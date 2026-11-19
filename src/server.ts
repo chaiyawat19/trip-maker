@@ -217,11 +217,18 @@ function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
     const items = db.select().from(billItems).where(eq(billItems.billId, b.id)).all();
     const calcItems = items.map((it) => {
       const shares = db.select().from(billItemShares).where(eq(billItemShares.billItemId, it.id)).all();
+      const exactAmounts: Record<number, number> = {};
+      for (const s of shares) {
+        if (s.exactAmount !== null && s.exactAmount !== undefined) {
+          exactAmounts[s.memberId] = s.exactAmount;
+        }
+      }
       return {
         name: it.name,
         amount: it.amount,
         isAddon: it.isAddon,
         participantIds: shares.map((s) => s.memberId),
+        ...(Object.keys(exactAmounts).length > 0 ? { exactAmounts } : {}),
       };
     });
     const calc = calculateBill({
@@ -610,7 +617,7 @@ async function handleTextMessage(
     return;
   }
 
-  if (parsed.type === 'QUICK_SPLIT' && userId) {
+  if ((parsed.type === 'QUICK_SPLIT' || parsed.type === 'ITEMIZED_SPLIT') && userId) {
     if (trip.status === 'PLANNING') {
       await lineClient.replyMessage({
         replyToken: event.replyToken,
@@ -638,20 +645,60 @@ async function handleTextMessage(
         ? allMembers.map((m) => m.id)
         : allMembers.filter((m) => names.some((n) => m.displayName.includes(n))).map((m) => m.id);
 
-    const items = [
-      {
-        name: parsed.title,
-        amount: parsed.baseAmount,
+    let items: Array<{
+      name: string;
+      amount: number;
+      isAddon: boolean;
+      participantIds: number[];
+      exactAmounts?: Record<number, number>;
+    }> = [];
+    let splitMode = 'EQUAL';
+
+    if (parsed.type === 'ITEMIZED_SPLIT') {
+      splitMode = 'ITEMIZED';
+      items = parsed.items.map((it) => ({
+        name: it.name,
+        amount: it.amount,
         isAddon: false,
-        participantIds: resolveNames(parsed.baseMentions),
-      },
-      ...parsed.addons.map((a) => ({
-        name: a.name,
-        amount: a.amount,
-        isAddon: true,
-        participantIds: resolveNames(a.mentions),
-      })),
-    ];
+        participantIds: resolveNames(it.mentions),
+      }));
+    } else if (Object.keys(parsed.exactShares).length > 0) {
+      splitMode = 'EXACT';
+      const exactAmounts: Record<number, number> = {};
+      const participantIds: number[] = [];
+      for (const [name, amt] of Object.entries(parsed.exactShares)) {
+        const matched = allMembers.find((m) => m.displayName.includes(name));
+        if (matched) {
+          exactAmounts[matched.id] = amt;
+          participantIds.push(matched.id);
+        }
+      }
+      items = [
+        {
+          name: parsed.title,
+          amount: parsed.baseAmount,
+          isAddon: false,
+          participantIds,
+          exactAmounts,
+        },
+      ];
+    } else {
+      splitMode = parsed.addons.length > 0 ? 'BASE_ADDON' : 'EQUAL';
+      items = [
+        {
+          name: parsed.title,
+          amount: parsed.baseAmount,
+          isAddon: false,
+          participantIds: resolveNames(parsed.baseMentions),
+        },
+        ...parsed.addons.map((a) => ({
+          name: a.name,
+          amount: a.amount,
+          isAddon: true,
+          participantIds: resolveNames(a.mentions),
+        })),
+      ];
+    }
 
     const calc = calculateBill({
       items,
@@ -666,7 +713,7 @@ async function handleTextMessage(
         tripId: trip.id,
         title: parsed.title,
         payerMemberId: payer.id,
-        splitMode: parsed.addons.length > 0 ? 'BASE_ADDON' : 'EQUAL',
+        splitMode,
         vatPercent: parsed.vatPercent,
         serviceChargePercent: parsed.serviceChargePercent,
         discountAmount: parsed.discountAmount,
@@ -683,7 +730,14 @@ async function handleTextMessage(
         .returning()
         .get();
       for (const mId of item.participantIds) {
-        db.insert(billItemShares).values({ billItemId: bi.id, memberId: mId, weight: 1 }).run();
+        db.insert(billItemShares)
+          .values({
+            billItemId: bi.id,
+            memberId: mId,
+            exactAmount: item.exactAmounts ? item.exactAmounts[mId] : null,
+            weight: 1,
+          })
+          .run();
       }
     }
 

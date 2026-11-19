@@ -22,6 +22,14 @@ export type ParsedCommand =
       serviceChargePercent: number;
       discountAmount: number;
     }
+  | {
+      type: 'ITEMIZED_SPLIT';
+      title: string;
+      items: Array<{ name: string; amount: number; mentions: string[] }>;
+      vatPercent: number;
+      serviceChargePercent: number;
+      discountAmount: number;
+    }
   | { type: 'OPEN_BILL_BUILDER'; title: string }
   | { type: 'LIST_BILLS' }
   | { type: 'SETTLE_SUMMARY' }
@@ -81,7 +89,9 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
   const trimmed = text.trim();
   if (!trimmed.startsWith('/')) return { type: 'UNKNOWN' };
 
-  const [cmd, ...restParts] = trimmed.split(/\s+/);
+  const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const firstLine = lines[0];
+  const [cmd, ...restParts] = firstLine.split(/\s+/);
   const rest = restParts.join(' ').trim();
 
   switch (cmd) {
@@ -143,38 +153,48 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
       }
       return { type: 'SET_AVAILABILITY', status, dates };
     }
+    case '/หารรวม':
+    case '/หารเพิ่ม':
+    case '/หารรวมเพิ่ม':
     case '/หาร':
       return parseQuickSplit(rest);
+    case '/หารเอง':
+      return parseExactSplit(rest);
+    case '/หารแยก':
+      return parseItemizedSplit(rest || 'บิลหารแยก', lines.slice(1));
     default:
       return { type: 'UNKNOWN' };
   }
 }
 
-function parseQuickSplit(rest: string): ParsedCommand {
-  let working = rest;
-
-  // Extract +vat7 / +vat
+function extractModifiers(text: string) {
+  let working = text;
   let vatPercent = 0;
   working = working.replace(/\+vat(\d+(?:\.\d+)?)?/gi, (_, num) => {
     vatPercent = num ? Number(num) : 7;
     return '';
   });
 
-  // Extract +sc10 / +sc
   let serviceChargePercent = 0;
   working = working.replace(/\+sc(\d+(?:\.\d+)?)?/gi, (_, num) => {
     serviceChargePercent = num ? Number(num) : 10;
     return '';
   });
 
-  // Extract -ส่วนลด 200 or -200
   let discountAmount = 0;
   working = working.replace(/-(?:ส่วนลด\s*)?(\d+(?:\.\d+)?)/g, (_, num) => {
     discountAmount += Number(num);
     return '';
   });
 
-  // Extract +addon 400(@เอ @บี)
+  return { working: working.trim(), vatPercent, serviceChargePercent, discountAmount };
+}
+
+function parseQuickSplit(rest: string): ParsedCommand {
+  const { working: modClean, vatPercent, serviceChargePercent, discountAmount } = extractModifiers(rest);
+  let working = modClean;
+
+  // Support both "+เบียร์ 400(@เอ @บี)" AND simpler "+เบียร์ 400 @เอ @บี"
   const addons: Array<{ name: string; amount: number; mentions: string[] }> = [];
   working = working.replace(/\+([^\s\d]+)\s+(\d+(?:\.\d+)?)\s*\(([^)]+)\)/g, (_, name, amt, people) => {
     const mentions = people
@@ -185,21 +205,28 @@ function parseQuickSplit(rest: string): ParsedCommand {
     return '';
   });
 
-  // Extract exact shares @เอ=500
+  // Simpler form without parentheses: "+เบียร์ 400 @เอ @บี" (until next + or end)
+  working = working.replace(/\+([^\s\d]+)\s+(\d+(?:\.\d+)?)((?:\s+@[^\s]+)*)/g, (_, name, amt, people) => {
+    const mentions = (people || '')
+      .split(/\s+/)
+      .map((s: string) => s.replace(/^@/, '').trim())
+      .filter(Boolean);
+    addons.push({ name, amount: Number(amt), mentions });
+    return '';
+  });
+
   const exactShares: Record<string, number> = {};
   working = working.replace(/@([^\s=]+)=(\d+(?:\.\d+)?)/g, (_, name, amt) => {
     exactShares[name.trim()] = Number(amt);
     return '';
   });
 
-  // Extract remaining @mentions for base
   const baseMentions: string[] = [];
   working = working.replace(/@([^\s]+)/g, (_, name) => {
     baseMentions.push(name.trim());
     return '';
   });
 
-  // Remaining should be: <title> <amount>
   const match = working.trim().match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);
   if (!match) return { type: 'HELP' };
 
@@ -210,6 +237,73 @@ function parseQuickSplit(rest: string): ParsedCommand {
     baseMentions,
     addons,
     exactShares,
+    vatPercent,
+    serviceChargePercent,
+    discountAmount,
+  };
+}
+
+function parseExactSplit(rest: string): ParsedCommand {
+  const { working: modClean, vatPercent, serviceChargePercent, discountAmount } = extractModifiers(rest);
+  let working = modClean;
+
+  const exactShares: Record<string, number> = {};
+  working = working.replace(/@([^\s=]+)=(\d+(?:\.\d+)?)/g, (_, name, amt) => {
+    exactShares[name.trim()] = Number(amt);
+    return '';
+  });
+
+  const title = working.trim();
+  const baseAmount = Object.values(exactShares).reduce((s, v) => s + v, 0);
+  if (!title || baseAmount <= 0) return { type: 'HELP' };
+
+  return {
+    type: 'QUICK_SPLIT',
+    title,
+    baseAmount,
+    baseMentions: [],
+    addons: [],
+    exactShares,
+    vatPercent,
+    serviceChargePercent,
+    discountAmount,
+  };
+}
+
+function parseItemizedSplit(title: string, bodyLines: string[]): ParsedCommand {
+  if (bodyLines.length === 0) return { type: 'HELP' };
+
+  let vatPercent = 0;
+  let serviceChargePercent = 0;
+  let discountAmount = 0;
+  const items: Array<{ name: string; amount: number; mentions: string[] }> = [];
+
+  for (const line of bodyLines) {
+    const mods = extractModifiers(line);
+    if (mods.vatPercent > 0) vatPercent = mods.vatPercent;
+    if (mods.serviceChargePercent > 0) serviceChargePercent = mods.serviceChargePercent;
+    discountAmount += mods.discountAmount;
+
+    if (!mods.working) continue;
+
+    const mentions: string[] = [];
+    const withoutMentions = mods.working.replace(/@([^\s]+)/g, (_, name) => {
+      mentions.push(name.trim());
+      return '';
+    });
+
+    const m = withoutMentions.trim().match(/^(.+?)\s+(\d+(?:\.\d+)?)$/);
+    if (m) {
+      items.push({ name: m[1].trim(), amount: Number(m[2]), mentions });
+    }
+  }
+
+  if (items.length === 0) return { type: 'HELP' };
+
+  return {
+    type: 'ITEMIZED_SPLIT',
+    title,
+    items,
     vatPercent,
     serviceChargePercent,
     discountAmount,

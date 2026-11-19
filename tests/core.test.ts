@@ -36,6 +36,60 @@ describe('commandParser', () => {
     expect(parseCommand('/สรุปยอด')).toEqual({ type: 'SETTLE_SUMMARY' });
   });
 
+  it('parses /หารรวม and /หารเพิ่ม without parentheses', () => {
+    expect(parseCommand('/หารรวม ค่ารถ 2000')).toEqual({
+      type: 'QUICK_SPLIT',
+      title: 'ค่ารถ',
+      baseAmount: 2000,
+      baseMentions: [],
+      addons: [],
+      exactShares: {},
+      vatPercent: 0,
+      serviceChargePercent: 0,
+      discountAmount: 0,
+    });
+
+    expect(parseCommand('/หารเพิ่ม ค่าข้าว 1200 +เบียร์ 400 @เอ @บี +vat7')).toEqual({
+      type: 'QUICK_SPLIT',
+      title: 'ค่าข้าว',
+      baseAmount: 1200,
+      baseMentions: [],
+      addons: [{ name: 'เบียร์', amount: 400, mentions: ['เอ', 'บี'] }],
+      exactShares: {},
+      vatPercent: 7,
+      serviceChargePercent: 0,
+      discountAmount: 0,
+    });
+  });
+
+  it('parses /หารแยก multi-line itemized split and /หารเอง exact split', () => {
+    expect(
+      parseCommand('/หารแยก ปิ้งย่าง\nหมู 600 @เอ @บี\nเบียร์ 300 @บี\n+vat7'),
+    ).toEqual({
+      type: 'ITEMIZED_SPLIT',
+      title: 'ปิ้งย่าง',
+      items: [
+        { name: 'หมู', amount: 600, mentions: ['เอ', 'บี'] },
+        { name: 'เบียร์', amount: 300, mentions: ['บี'] },
+      ],
+      vatPercent: 7,
+      serviceChargePercent: 0,
+      discountAmount: 0,
+    });
+
+    expect(parseCommand('/หารเอง ค่าน้ำมัน @เอ=500 @บี=300')).toEqual({
+      type: 'QUICK_SPLIT',
+      title: 'ค่าน้ำมัน',
+      baseAmount: 800,
+      baseMentions: [],
+      addons: [],
+      exactShares: { เอ: 500, บี: 300 },
+      vatPercent: 0,
+      serviceChargePercent: 0,
+      discountAmount: 0,
+    });
+  });
+
   it('parses /หาร with base + beer add-on + vat7', () => {
     expect(parseCommand('/หาร ค่าข้าว 1200 +เบียร์ 400(@เอ @บี) +vat7')).toEqual({
       type: 'QUICK_SPLIT',
