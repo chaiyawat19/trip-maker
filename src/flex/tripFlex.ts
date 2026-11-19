@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME } from './theme.js';
+import { THEME, GRADIENT_HEADER, GRADIENT_SUCCESS, pillBadge } from './theme.js';
 import { formatThaiRange } from '../core/dateMatcher.js';
 import { buildLiffBillsUrl } from '../core/promptpay.js';
 
@@ -23,20 +23,25 @@ export function buildWelcomeFlex(): FlexMessage {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
+        background: GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
           {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [pillBadge('PROMPTPAI • พร้อมไป', THEME.lavenderHaze, THEME.velvetGrape)],
+          },
+          {
             type: 'text',
-            text: 'สวัสดี! ผมชื่อ "พร้อมไป (PromptPai)"',
-            color: THEME.velvetGrape,
-            size: 'md',
-            weight: 'regular',
+            text: 'สวัสดี! ผมชื่อ "พร้อมไป"',
+            color: THEME.surface,
+            size: 'lg',
+            margin: 'md',
           },
           {
             type: 'text',
             text: 'ผู้ช่วยหาวันว่าง & หารค่าใช้จ่ายประจำกลุ่ม',
-            color: THEME.textSecondary,
+            color: THEME.lavenderHaze,
             size: 'xs',
             margin: 'xs',
           },
@@ -50,7 +55,7 @@ export function buildWelcomeFlex(): FlexMessage {
         contents: [
           stepRow('1', 'สร้างทริป & รวมแก๊ง', 'พิมพ์ /สร้างทริป <ชื่อทริป> แล้วให้เพื่อนกดเข้าร่วม'),
           stepRow('2', 'หาวันว่าง & เริ่มทริป', 'พิมพ์ /นัด 1-15 ธ.ค. 3วัน หรือ /เริ่มทริป เพื่อเปิดหารเงิน'),
-          stepRow('3', 'จดบิล & เคลียร์ยอดโอน', 'รองรับหารเท่า, +เบียร์เฉพาะคน, VAT/SC และปิดทริป'),
+          stepRow('3', 'จดบิล & QR พร้อมเพย์', 'พิมพ์ /หาร เพื่อเปิดเว็บ LIFF จดบิลและสแกน QR โอนเงิน'),
         ],
       },
       footer: {
@@ -68,9 +73,9 @@ export function buildWelcomeFlex(): FlexMessage {
           {
             type: 'button',
             style: 'secondary',
-            color: THEME.lavenderHaze,
+            color: THEME.lavenderTint,
             height: 'sm',
-            action: { type: 'message', label: 'วิธีใช้', text: '/วิธีใช้' },
+            action: { type: 'message', label: 'คำสั่งทั้งหมด', text: '/คำสั่ง' },
           },
         ],
       },
@@ -247,22 +252,36 @@ export function buildTripCreatedFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
+        background: params.status === 'COMPLETED' ? GRADIENT_SUCCESS : GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
           {
-            type: 'text',
-            text: `ACTIVE TRIP • ${statusLabel(params.status, params.lockedStartDate, params.lockedEndDate)}`,
-            color: THEME.primary,
-            size: 'xxs',
-            wrap: true,
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge(
+                params.status === 'LOCKED' ? 'เริ่มทริปแล้ว' : params.status === 'COMPLETED' ? 'ปิดทริปแล้ว' : 'กำลังวางแผน',
+                params.status === 'LOCKED' ? THEME.freeBg : THEME.lavenderHaze,
+                params.status === 'LOCKED' ? THEME.freeText : THEME.velvetGrape,
+              ),
+              {
+                type: 'text',
+                text: `${params.members.length} สมาชิก`,
+                size: 'xs',
+                color: THEME.lavenderHaze,
+                align: 'end',
+                flex: 1,
+              },
+            ],
           },
           {
             type: 'text',
             text: params.tripName,
-            color: THEME.velvetGrape,
-            size: 'lg',
-            margin: 'xs',
+            color: THEME.surface,
+            size: 'xl',
+            margin: 'md',
+            wrap: true,
           },
         ],
       },
@@ -275,31 +294,43 @@ export function buildTripCreatedFlex(params: {
           {
             type: 'box',
             layout: 'horizontal',
+            alignItems: 'center',
+            backgroundColor: THEME.lavenderTint,
+            borderWidth: '1px',
+            borderColor: THEME.border,
+            cornerRadius: '12px',
+            paddingAll: '10px',
             contents: [
-              { type: 'text', text: 'วันเดินทาง', size: 'xs', color: THEME.textSecondary, flex: 2 },
+              { type: 'text', text: 'วันเดินทาง', size: 'xs', color: THEME.primary, flex: 2 },
               { type: 'text', text: dateText, size: 'xs', color: THEME.velvetGrape, flex: 5, align: 'end', wrap: true },
             ],
           },
           {
-            type: 'text',
-            text: `สมาชิก (${params.members.length} คน)`,
-            color: THEME.textSecondary,
-            size: 'xs',
-            margin: 'xs',
-          },
-          {
             type: 'box',
             layout: 'vertical',
+            borderWidth: '1px',
+            borderColor: THEME.border,
+            cornerRadius: '12px',
+            paddingAll: '12px',
             spacing: 'xs',
-            contents: memberRows,
+            contents: [
+              {
+                type: 'text',
+                text: `สมาชิก (${params.members.length} คน)`,
+                color: THEME.primary,
+                size: 'xxs',
+              },
+              ...memberRows,
+            ],
           },
           {
             type: 'box',
             layout: 'vertical',
             backgroundColor: THEME.lavenderTint,
-            cornerRadius: '10px',
-            paddingAll: '10px',
-            margin: 'sm',
+            borderWidth: '1px',
+            borderColor: THEME.border,
+            cornerRadius: '12px',
+            paddingAll: '12px',
             spacing: 'xs',
             contents: [
               { type: 'text', text: 'ทำอะไรต่อได้บ้าง', size: 'xxs', color: THEME.primary },
@@ -580,11 +611,18 @@ export function buildMembersFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
+        background: GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
-          { type: 'text', text: `สมาชิกทริป • ${params.tripName}`, size: 'xs', color: THEME.primary },
-          { type: 'text', text: `ทั้งหมด ${params.members.length} คน`, size: 'md', color: THEME.velvetGrape, margin: 'xs' },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge(`สมาชิก ${params.members.length} คน`, THEME.lavenderHaze, THEME.velvetGrape),
+            ],
+          },
+          { type: 'text', text: params.tripName, size: 'lg', color: THEME.surface, margin: 'md' },
         ],
       },
       body: {

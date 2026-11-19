@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME } from './theme.js';
+import { THEME, GRADIENT_HEADER, pillBadge } from './theme.js';
 
 export function buildHelpFlex(): messagingApi.FlexMessage {
   return {
@@ -59,17 +59,25 @@ function helpBubble(
   subtitle: string,
   rows: messagingApi.FlexBox[],
 ): messagingApi.FlexBubble {
+  const [badge, heading] = title.includes('•') ? title.split('•').map((s) => s.trim()) : ['GUIDE', title];
   return {
     type: 'bubble',
     size: 'mega',
     header: {
       type: 'box',
       layout: 'vertical',
-      backgroundColor: THEME.lavenderTint,
-      paddingAll: '14px',
+      background: GRADIENT_HEADER,
+      paddingAll: '16px',
       contents: [
-        { type: 'text', text: title, size: 'sm', color: THEME.velvetGrape },
-        { type: 'text', text: subtitle, size: 'xxs', color: THEME.primary, margin: 'xs' },
+        {
+          type: 'box',
+          layout: 'horizontal',
+          contents: [
+            pillBadge(badge, THEME.lavenderHaze, THEME.velvetGrape),
+          ],
+        },
+        { type: 'text', text: heading, size: 'md', color: THEME.surface, margin: 'sm' },
+        { type: 'text', text: subtitle, size: 'xxs', color: THEME.lavenderHaze, margin: 'xs' },
       ],
     },
     body: {
@@ -87,7 +95,9 @@ function item(cmd: string, desc: string): messagingApi.FlexBox {
     type: 'box',
     layout: 'vertical',
     backgroundColor: THEME.lavenderTint,
-    cornerRadius: '10px',
+    borderWidth: '1px',
+    borderColor: THEME.border,
+    cornerRadius: '12px',
     paddingAll: '10px',
     spacing: 'xs',
     contents: [

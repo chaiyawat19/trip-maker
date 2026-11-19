@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME } from './theme.js';
+import { THEME, GRADIENT_HEADER, pillBadge } from './theme.js';
 import { enumerateDates, formatThaiRange, type AvailabilityRecord, type WindowMatch } from '../core/dateMatcher.js';
 
 function compressDayNumbers(days: number[]): string {
@@ -165,20 +165,30 @@ export function buildCalendarPollFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
+        background: GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
           {
-            type: 'text',
-            text: `${params.tripName} • ${pollRangeText}`,
-            size: 'xs',
-            color: THEME.primary,
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge(`ตอบแล้ว ${params.respondedCount}/${totalMembers} คน`, THEME.lavenderHaze, THEME.velvetGrape),
+              { type: 'text', text: pollRangeText, size: 'xs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
+            ],
           },
           {
             type: 'text',
-            text: `กดปุ่มด้านล่างเพื่อเลือกวันว่างในเว็บ (ตอบแล้ว ${params.respondedCount}/${totalMembers} คน)`,
-            size: 'sm',
-            color: THEME.velvetGrape,
+            text: params.tripName,
+            size: 'lg',
+            color: THEME.surface,
+            margin: 'md',
+          },
+          {
+            type: 'text',
+            text: 'กดปุ่มด้านล่างเพื่อเลือกวันว่างในเว็บ',
+            size: 'xs',
+            color: THEME.lavenderHaze,
             margin: 'xs',
             wrap: true,
           },
@@ -196,12 +206,14 @@ export function buildCalendarPollFlex(params: {
             type: 'box',
             layout: 'vertical',
             backgroundColor: THEME.lavenderTint,
-            cornerRadius: '10px',
+            borderWidth: '1px',
+            borderColor: THEME.border,
+            cornerRadius: '12px',
             paddingAll: '10px',
             spacing: 'xs',
             margin: 'sm',
             contents: [
-              { type: 'text', text: 'สถานะรายคน', size: 'xxs', color: THEME.textSecondary },
+              { type: 'text', text: 'สถานะรายคน', size: 'xxs', color: THEME.primary },
               ...memberRows,
             ],
           },
@@ -209,7 +221,9 @@ export function buildCalendarPollFlex(params: {
             type: 'box',
             layout: 'vertical',
             backgroundColor: THEME.lavenderHaze,
-            cornerRadius: '10px',
+            borderWidth: '1px',
+            borderColor: THEME.primary,
+            cornerRadius: '12px',
             paddingAll: '10px',
             contents: [
               {

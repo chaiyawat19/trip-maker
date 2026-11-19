@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME } from './theme.js';
+import { THEME, GRADIENT_HEADER, GRADIENT_SUCCESS, pillBadge } from './theme.js';
 import { buildLiffBillsUrl } from '../core/promptpay.js';
 
 export function buildSettlementFlex(params: {
@@ -24,20 +24,23 @@ export function buildSettlementFlex(params: {
           layout: 'horizontal',
           alignItems: 'center',
           backgroundColor: t.status === 'CONFIRMED' ? THEME.freeBg : THEME.lavenderTint,
-          cornerRadius: '12px',
-          paddingAll: '10px',
+          borderWidth: '1px',
+          borderColor: t.status === 'CONFIRMED' ? '#BBF7D0' : THEME.border,
+          cornerRadius: '14px',
+          paddingAll: '12px',
           contents: [
             {
               type: 'box',
               layout: 'vertical',
               flex: 1,
               contents: [
-                { type: 'text', text: `${t.fromName} ไป ${t.toName}`, size: 'xs', color: THEME.textSecondary },
+                { type: 'text', text: `${t.fromName} โอนให้ ${t.toName}`, size: 'xs', color: THEME.textSecondary },
                 {
                   type: 'text',
                   text: `${t.amount.toLocaleString()} ฿`,
-                  size: 'md',
+                  size: 'lg',
                   color: t.status === 'CONFIRMED' ? THEME.freeText : THEME.velvetGrape,
+                  margin: 'xs',
                 },
               ],
             },
@@ -75,21 +78,28 @@ export function buildSettlementFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: allCleared ? THEME.freeBg : THEME.lavenderTint,
-        paddingAll: '16px',
+        background: allCleared ? GRADIENT_SUCCESS : GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
           {
-            type: 'text',
-            text: allCleared ? `เคลียร์ยอดครบ 100% • ${params.tripName}` : `เคลียร์ยอด • ${params.tripName}`,
-            size: 'xs',
-            color: allCleared ? THEME.freeText : THEME.primary,
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge(
+                allCleared ? 'เคลียร์ครบ 100%' : `${confirmedCount}/${params.transfers.length} เคลียร์แล้ว`,
+                allCleared ? THEME.freeBg : THEME.lavenderHaze,
+                allCleared ? THEME.freeText : THEME.velvetGrape,
+              ),
+              { type: 'text', text: params.tripName, size: 'xs', color: THEME.surface, align: 'end', flex: 1 },
+            ],
           },
           {
             type: 'text',
-            text: `รายการโอนเงินสุทธิ (${confirmedCount}/${params.transfers.length} เคลียร์แล้ว)`,
-            size: 'md',
-            color: THEME.velvetGrape,
-            margin: 'xs',
+            text: 'รายการโอนเงินสุทธิ',
+            size: 'lg',
+            color: THEME.surface,
+            margin: 'md',
           },
         ],
       },
@@ -119,7 +129,7 @@ export function buildSettlementFlex(params: {
           {
             type: 'button',
             style: allCleared ? 'primary' : 'secondary',
-            color: allCleared ? THEME.freeText : THEME.lavenderHaze,
+            color: allCleared ? THEME.freeText : THEME.lavenderTint,
             height: 'sm',
             action: {
               type: 'postback',

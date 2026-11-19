@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME } from './theme.js';
+import { THEME, GRADIENT_HEADER, pillBadge } from './theme.js';
 import { buildLiffBillsUrl } from '../core/promptpay.js';
 
 export function buildOpenBillsLiffFlex(params: {
@@ -18,15 +18,30 @@ export function buildOpenBillsLiffFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
+        background: GRADIENT_HEADER,
+        paddingAll: '18px',
         contents: [
-          { type: 'text', text: `จัดการบิล & QR พร้อมเพย์ • ${params.tripName}`, size: 'xs', color: THEME.primary },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge('LIFF WEB APP', THEME.lavenderHaze, THEME.velvetGrape),
+              { type: 'text', text: params.tripName, size: 'xs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
+            ],
+          },
           {
             type: 'text',
-            text: `รวม ${params.billCount} บิล (${params.totalSpend.toLocaleString()} ฿)`,
-            size: 'lg',
-            color: THEME.velvetGrape,
+            text: `รวม ${params.billCount} บิล • ${params.totalSpend.toLocaleString()} ฿`,
+            size: 'xl',
+            color: THEME.surface,
+            margin: 'md',
+          },
+          {
+            type: 'text',
+            text: 'จัดการบิล หารเงิน & สร้าง QR พร้อมเพย์',
+            size: 'xs',
+            color: THEME.lavenderHaze,
             margin: 'xs',
           },
         ],
@@ -38,11 +53,24 @@ export function buildOpenBillsLiffFlex(params: {
         paddingAll: '16px',
         contents: [
           {
-            type: 'text',
-            text: 'จดบิลได้ครบทั้ง 4 แบบ (หารเท่า / หารเพิ่ม / หารแยก / กำหนดเอง) พร้อม VAT, SC, ส่วนลด และสร้าง QR พร้อมเพย์สำหรับโอนเงินได้ในหน้าเดียว',
-            size: 'xs',
-            color: THEME.velvetGrape,
-            wrap: true,
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: THEME.lavenderTint,
+            borderWidth: '1px',
+            borderColor: THEME.border,
+            cornerRadius: '12px',
+            paddingAll: '12px',
+            spacing: 'xs',
+            contents: [
+              { type: 'text', text: 'ทำอะไรได้บ้างในหน้าเว็บ', size: 'xxs', color: THEME.primary },
+              {
+                type: 'text',
+                text: '• จดบิลครบ 4 แบบ (หารเท่า / หารเพิ่ม / หารแยก / กำหนดเอง)\n• คิด VAT, Service Charge และส่วนลดอัตโนมัติ\n• ดูบิลทั้งหมด ลบบิล และสแกน QR พร้อมเพย์',
+                size: 'xs',
+                color: THEME.velvetGrape,
+                wrap: true,
+              },
+            ],
           },
         ],
       },
@@ -65,7 +93,7 @@ export function buildOpenBillsLiffFlex(params: {
           {
             type: 'button',
             style: 'secondary',
-            color: THEME.lavenderHaze,
+            color: THEME.lavenderTint,
             height: 'sm',
             action: { type: 'message', label: 'ดูสรุปยอดโอนในแชท', text: '/สรุปยอด' },
           },
@@ -88,6 +116,12 @@ export function buildBillReceiptFlex(params: {
   const shareRows: messagingApi.FlexBox[] = params.shares.map((s) => ({
     type: 'box',
     layout: 'horizontal',
+    backgroundColor: THEME.lavenderTint,
+    cornerRadius: '8px',
+    paddingStart: '10px',
+    paddingEnd: '10px',
+    paddingTop: '6px',
+    paddingBottom: '6px',
     contents: [
       { type: 'text', text: s.displayName, size: 'xs', color: THEME.velvetGrape, flex: 1 },
       { type: 'text', text: `${s.netTotal.toLocaleString()} ฿`, size: 'xs', color: THEME.primary, align: 'end' },
@@ -102,7 +136,7 @@ export function buildBillReceiptFlex(params: {
     {
       type: 'button',
       style: 'secondary',
-      color: THEME.lavenderHaze,
+      color: THEME.lavenderTint,
       height: 'sm',
       action: { type: 'message', label: 'สรุปยอดทั้งทริป', text: '/สรุปยอด' },
     },
@@ -130,37 +164,37 @@ export function buildBillReceiptFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
+        background: GRADIENT_HEADER,
         paddingAll: '16px',
         contents: [
-          ...(tags.length > 0
-            ? [{ type: 'text' as const, text: tags.join(' • '), size: 'xxs' as const, color: THEME.primary }]
-            : []),
           {
             type: 'box',
             layout: 'horizontal',
-            margin: 'xs',
+            alignItems: 'center',
             contents: [
-              { type: 'text', text: params.title, size: 'md', color: THEME.velvetGrape, flex: 1, wrap: true },
-              { type: 'text', text: `${params.grandTotal.toLocaleString()} ฿`, size: 'lg', color: THEME.primary, align: 'end' },
+              pillBadge(tags.length > 0 ? tags.join(' • ') : 'บิลใหม่', THEME.lavenderHaze, THEME.velvetGrape),
+              { type: 'text', text: `โดย ${params.payerName}`, size: 'xxs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
             ],
           },
           {
-            type: 'text',
-            text: `สำรองจ่ายโดย ${params.payerName}`,
-            size: 'xxs',
-            color: THEME.textSecondary,
-            margin: 'xs',
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'md',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: params.title, size: 'md', color: THEME.surface, flex: 1, wrap: true },
+              { type: 'text', text: `${params.grandTotal.toLocaleString()} ฿`, size: 'xl', color: THEME.surface, align: 'end' },
+            ],
           },
         ],
       },
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
+        spacing: 'xs',
         paddingAll: '16px',
         contents: [
-          { type: 'text', text: 'สรุปยอดต่อคน', size: 'xxs', color: THEME.textSecondary },
+          { type: 'text', text: 'สรุปยอดต่อคน', size: 'xxs', color: THEME.textSecondary, margin: 'none' },
           ...shareRows,
         ],
       },
@@ -189,6 +223,12 @@ export function buildBillMenuFlex(params: {
       : params.bills.slice(-8).map((b, idx) => ({
           type: 'box',
           layout: 'horizontal',
+          backgroundColor: THEME.lavenderTint,
+          cornerRadius: '8px',
+          paddingStart: '10px',
+          paddingEnd: '10px',
+          paddingTop: '6px',
+          paddingBottom: '6px',
           contents: [
             { type: 'text', text: `${idx + 1}. ${b.title}`, size: 'xs', color: THEME.velvetGrape, flex: 3, wrap: true },
             { type: 'text', text: `${b.totalAmount.toLocaleString()} ฿`, size: 'xs', color: THEME.primary, flex: 1, align: 'end' },
@@ -204,23 +244,31 @@ export function buildBillMenuFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
+        background: GRADIENT_HEADER,
         paddingAll: '16px',
         contents: [
-          { type: 'text', text: `รายการบิล • ${params.tripName}`, size: 'xs', color: THEME.primary },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              pillBadge(`${params.bills.length} บิล`, THEME.lavenderHaze, THEME.velvetGrape),
+              { type: 'text', text: params.tripName, size: 'xs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
+            ],
+          },
           {
             type: 'text',
-            text: `รวม ${params.bills.length} บิล (${totalSpend.toLocaleString()} ฿)`,
-            size: 'md',
-            color: THEME.velvetGrape,
-            margin: 'xs',
+            text: `ยอดใช้จ่ายรวม ${totalSpend.toLocaleString()} ฿`,
+            size: 'lg',
+            color: THEME.surface,
+            margin: 'md',
           },
         ],
       },
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
+        spacing: 'xs',
         paddingAll: '16px',
         contents: [
           ...billRows,
@@ -228,6 +276,8 @@ export function buildBillMenuFlex(params: {
             type: 'box',
             layout: 'vertical',
             backgroundColor: THEME.lavenderTint,
+            borderWidth: '1px',
+            borderColor: THEME.border,
             cornerRadius: '10px',
             paddingAll: '10px',
             margin: 'md',
@@ -265,16 +315,16 @@ export function buildBillMenuFlex(params: {
               {
                 type: 'button',
                 style: 'secondary',
-                color: THEME.lavenderHaze,
+                color: THEME.lavenderTint,
                 height: 'sm',
                 action: { type: 'message', label: 'สรุปยอดโอน', text: '/สรุปยอด' },
               },
               {
                 type: 'button',
                 style: 'secondary',
-                color: THEME.lavenderHaze,
+                color: THEME.lavenderTint,
                 height: 'sm',
-                action: { type: 'message', label: 'วิธีใช้', text: '/วิธีใช้' },
+                action: { type: 'message', label: 'คำสั่งทั้งหมด', text: '/คำสั่ง' },
               },
             ],
           },
