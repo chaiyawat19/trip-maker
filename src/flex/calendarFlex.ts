@@ -25,6 +25,7 @@ function compressDayNumbers(days: number[]): string {
 export function buildCalendarPollFlex(params: {
   pollId: number;
   tripName: string;
+  tripStatus?: string;
   startDate: string;
   endDate: string;
   durationDays: number;
@@ -34,7 +35,7 @@ export function buildCalendarPollFlex(params: {
   records: AvailabilityRecord[];
   topWindows: WindowMatch[];
 }): messagingApi.FlexMessage {
-  const mode = params.activeMode ?? 'FREE';
+  const isClosed = params.tripStatus === 'COMPLETED';
   const allDates = enumerateDates(params.startDate, params.endDate);
   const totalMembers = params.members.length;
 
@@ -237,39 +238,43 @@ export function buildCalendarPollFlex(params: {
           },
         ],
       },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        contents: [
-          {
-            type: 'button',
-            style: 'primary',
-            color: THEME.primary,
-            height: 'sm',
-            action: {
-              type: 'uri',
-              label: 'เลือกวันว่างในเว็บ',
-              uri: `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?pollId=${params.pollId}`,
-            },
-          },
-          ...(best
-            ? [
+      ...(isClosed
+        ? {}
+        : {
+            footer: {
+              type: 'box',
+              layout: 'vertical',
+              spacing: 'sm',
+              contents: [
                 {
-                  type: 'button' as const,
-                  style: 'secondary' as const,
-                  color: THEME.lavenderHaze,
-                  height: 'sm' as const,
+                  type: 'button',
+                  style: 'primary',
+                  color: THEME.primary,
+                  height: 'sm',
                   action: {
-                    type: 'postback' as const,
-                    label: `ล็อกวัน ${formatThaiRange(best.startDate, best.endDate)}`,
-                    data: `action=lock_date&pollId=${params.pollId}&start=${best.startDate}&end=${best.endDate}`,
+                    type: 'uri',
+                    label: 'เลือกวันว่างในเว็บ',
+                    uri: `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?pollId=${params.pollId}`,
                   },
                 },
-              ]
-            : []),
-        ],
-      },
+                ...(best
+                  ? [
+                      {
+                        type: 'button' as const,
+                        style: 'secondary' as const,
+                        color: THEME.lavenderHaze,
+                        height: 'sm' as const,
+                        action: {
+                          type: 'postback' as const,
+                          label: `ล็อกวัน ${formatThaiRange(best.startDate, best.endDate)}`,
+                          data: `action=lock_date&pollId=${params.pollId}&start=${best.startDate}&end=${best.endDate}`,
+                        },
+                      },
+                    ]
+                  : []),
+              ],
+            },
+          }),
     },
   };
 }

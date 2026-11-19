@@ -104,6 +104,7 @@ app.get('/pick', async (request, reply) => {
   const html = renderPickPage({
     pollId: poll.id,
     tripName: trip.name,
+    tripStatus: trip.status,
     startDate: poll.startDate,
     endDate: poll.endDate,
     durationDays: poll.durationDays,
@@ -127,6 +128,9 @@ app.post('/api/pick', async (request, reply) => {
   if (!poll) return reply.code(404).send({ error: 'Poll not found' });
   const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
   if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+  if (trip.status === 'COMPLETED') {
+    return reply.code(400).send({ error: 'ทริปนี้ปิดไปแล้ว ไม่สามารถแก้ไขวันว่างได้' });
+  }
 
   // Replace member's existing records in this poll with batch entries
   db.delete(availabilities)
@@ -575,6 +579,7 @@ function buildPollFlexForId(pollId: number, activeMode: 'FREE' | 'MAYBE' | 'BUSY
   return buildCalendarPollFlex({
     pollId: poll.id,
     tripName: trip.name,
+    tripStatus: trip.status,
     startDate: poll.startDate,
     endDate: poll.endDate,
     durationDays: poll.durationDays,
@@ -975,6 +980,13 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'CREATE_POLL') {
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ปิดทริปไปแล้วครับ พิมพ์ /สร้างทริป เพื่อเริ่มทริปใหม่ได้เลย` }],
+      });
+      return;
+    }
     const poll = db
       .insert(datePolls)
       .values({
@@ -1045,6 +1057,13 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'SET_AVAILABILITY' && userId) {
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ปิดทริปไปแล้ว ไม่สามารถแก้ไขวันว่างได้ครับ` }],
+      });
+      return;
+    }
     const member = await ensureMemberInTrip(trip.id, groupId, userId);
     const poll = db
       .select()
@@ -1073,6 +1092,13 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'SET_GUEST_AVAILABILITY' && userId) {
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ปิดทริปไปแล้ว ไม่สามารถแก้ไขวันว่างได้ครับ` }],
+      });
+      return;
+    }
     if (trip.createdByUserId && trip.createdByUserId !== userId) {
       await lineClient.replyMessage({
         replyToken: event.replyToken,
@@ -1433,6 +1459,14 @@ async function handlePostback(
     const mode = (params.get('mode') || 'FREE') as 'FREE' | 'MAYBE' | 'BUSY';
     const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
     if (!poll || !date) return;
+    const pollTrip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+    if (pollTrip?.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${pollTrip.name}" ปิดทริปไปแล้ว ไม่สามารถแก้ไขวันว่างได้ครับ` }],
+      });
+      return;
+    }
 
     const member = await ensureMemberInTrip(poll.tripId, groupId, userId);
     upsertAvailability(poll.id, member.id, date, mode);
@@ -1448,6 +1482,14 @@ async function handlePostback(
     const pollId = Number(params.get('pollId'));
     const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
     if (!poll) return;
+    const pollTrip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+    if (pollTrip?.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${pollTrip.name}" ปิดทริปไปแล้ว ไม่สามารถแก้ไขวันว่างได้ครับ` }],
+      });
+      return;
+    }
     const member = await ensureMemberInTrip(poll.tripId, groupId, userId);
     for (const d of enumerateDates(poll.startDate, poll.endDate)) {
       upsertAvailability(poll.id, member.id, d, 'FREE');
@@ -1465,6 +1507,14 @@ async function handlePostback(
     const end = params.get('end');
     const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
     if (!poll || !start || !end) return;
+    const pollTrip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+    if (pollTrip?.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${pollTrip.name}" ปิดทริปไปแล้ว ไม่สามารถล็อกวันได้ครับ` }],
+      });
+      return;
+    }
 
     db.update(trips)
       .set({ status: 'LOCKED', lockedStartDate: start, lockedEndDate: end })
