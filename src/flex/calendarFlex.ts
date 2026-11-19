@@ -77,11 +77,6 @@ export function buildCalendarPollFlex(params: {
       paddingBottom: '4px',
       alignItems: 'center',
       justifyContent: 'center',
-      action: {
-        type: 'postback',
-        label: dayNum,
-        data: `action=toggle_day&pollId=${params.pollId}&date=${d}&mode=${mode}`,
-      },
       contents: [
         { type: 'text', text: dayNum, size: 'xs', color: fg, align: 'center' },
         { type: 'text', text: sub, size: 'xxs', color: fg, align: 'center' },
@@ -113,45 +108,6 @@ export function buildCalendarPollFlex(params: {
       color: THEME.textSecondary,
       align: 'center',
       flex: 1,
-    })),
-  };
-
-  const modeSwitcher: messagingApi.FlexBox = {
-    type: 'box',
-    layout: 'horizontal',
-    spacing: 'xs',
-    backgroundColor: THEME.lavenderTint,
-    cornerRadius: '10px',
-    paddingAll: '4px',
-    contents: (
-      [
-        { key: 'FREE', label: 'โหมด: ว่าง', color: THEME.freeText },
-        { key: 'MAYBE', label: 'อาจจะ', color: THEME.maybeText },
-        { key: 'BUSY', label: 'ไม่ว่าง', color: THEME.busyText },
-      ] as const
-    ).map((m) => ({
-      type: 'box',
-      layout: 'vertical',
-      flex: 1,
-      backgroundColor: mode === m.key ? THEME.surface : THEME.lavenderTint,
-      cornerRadius: '8px',
-      paddingTop: '6px',
-      paddingBottom: '6px',
-      alignItems: 'center',
-      action: {
-        type: 'postback',
-        label: m.label,
-        data: `action=cal_mode&pollId=${params.pollId}&mode=${m.key}`,
-      },
-      contents: [
-        {
-          type: 'text',
-          text: m.label,
-          size: 'xxs',
-          color: mode === m.key ? m.color : THEME.textSecondary,
-          align: 'center',
-        },
-      ],
     })),
   };
 
@@ -220,7 +176,7 @@ export function buildCalendarPollFlex(params: {
           },
           {
             type: 'text',
-            text: `จิ้มเลือกวันที่ต้องการ (ตอบแล้ว ${params.respondedCount}/${totalMembers} คน)`,
+            text: `กดปุ่มด้านล่างเพื่อเลือกวันว่างในเว็บ (ตอบแล้ว ${params.respondedCount}/${totalMembers} คน)`,
             size: 'sm',
             color: THEME.velvetGrape,
             margin: 'xs',
@@ -279,19 +235,8 @@ export function buildCalendarPollFlex(params: {
             height: 'sm',
             action: {
               type: 'uri',
-              label: 'เลือกวันว่าง (ไม่เด้งแชทรัว)',
+              label: 'เลือกวันว่างในเว็บ',
               uri: `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?pollId=${params.pollId}`,
-            },
-          },
-          {
-            type: 'button',
-            style: 'secondary',
-            color: THEME.lavenderTint,
-            height: 'sm',
-            action: {
-              type: 'postback',
-              label: 'ฉันว่างทุกวันในช่วงนี้',
-              data: `action=all_free&pollId=${params.pollId}`,
             },
           },
           ...(best
