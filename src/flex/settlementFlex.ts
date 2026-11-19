@@ -126,17 +126,21 @@ export function buildSettlementFlex(params: {
               uri: buildLiffBillsUrl(params.tripId),
             },
           },
-          {
-            type: 'button',
-            style: allCleared ? 'primary' : 'secondary',
-            color: allCleared ? THEME.freeText : THEME.lavenderTint,
-            height: 'sm',
-            action: {
-              type: 'postback',
-              label: 'ปิดทริปนี้',
-              data: `action=close_trip&tripId=${params.tripId}`,
-            },
-          },
+          ...(allCleared || params.transfers.length === 0
+            ? [
+                {
+                  type: 'button' as const,
+                  style: 'primary' as const,
+                  color: THEME.freeText,
+                  height: 'sm' as const,
+                  action: {
+                    type: 'postback' as const,
+                    label: 'ปิดทริปนี้',
+                    data: `action=close_trip&tripId=${params.tripId}`,
+                  },
+                },
+              ]
+            : []),
         ],
       },
     },

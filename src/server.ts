@@ -678,9 +678,21 @@ function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
   });
 }
 
-function closeTripAndBuildFlex(groupId: string, tripId: number) {
+function closeTripAndBuildFlex(groupId: string, tripId: number): messagingApi.Message[] | null {
   const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
   if (!trip) return null;
+
+  const settlementRows = syncSettlementRows(tripId);
+  const unsettled = settlementRows.filter((s) => s.status !== 'CONFIRMED');
+  if (unsettled.length > 0) {
+    return [
+      {
+        type: 'text',
+        text: `ยังไม่สามารถปิดทริป "${trip.name}" ได้ เพราะยังมียอดค้างเคลียร์ ${unsettled.length} รายการครับ กรุณาโอนและยืนยันรับเงินให้ครบก่อนปิดทริป`,
+      },
+      syncAndBuildSettlementFlex(trip.id, trip.name),
+    ];
+  }
 
   db.update(trips).set({ status: 'COMPLETED' }).where(eq(trips.id, tripId)).run();
   const grp = db.select().from(groups).where(eq(groups.groupId, groupId)).get();
@@ -692,14 +704,16 @@ function closeTripAndBuildFlex(groupId: string, tripId: number) {
   const tripBills = db.select().from(bills).where(eq(bills.tripId, tripId)).all();
   const totalSpend = tripBills.reduce((s, b) => s + b.totalAmount, 0);
 
-  return buildTripCompletedFlex({
-    tripName: trip.name,
-    lockedStartDate: trip.lockedStartDate,
-    lockedEndDate: trip.lockedEndDate,
-    memberCount: members.length,
-    billCount: tripBills.length,
-    totalSpend,
-  });
+  return [
+    buildTripCompletedFlex({
+      tripName: trip.name,
+      lockedStartDate: trip.lockedStartDate,
+      lockedEndDate: trip.lockedEndDate,
+      memberCount: members.length,
+      billCount: tripBills.length,
+      totalSpend,
+    }),
+  ];
 }
 
 async function handleTextMessage(
@@ -910,9 +924,9 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'CLOSE_TRIP') {
-    const flex = closeTripAndBuildFlex(groupId, trip.id);
-    if (flex) {
-      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    const messages = closeTripAndBuildFlex(groupId, trip.id);
+    if (messages) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages });
     }
     return;
   }
@@ -1436,9 +1450,9 @@ async function handlePostback(
 
   if (action === 'close_trip') {
     const tripId = Number(params.get('tripId'));
-    const flex = closeTripAndBuildFlex(groupId, tripId);
-    if (flex) {
-      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    const messages = closeTripAndBuildFlex(groupId, tripId);
+    if (messages) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages });
     }
     return;
   }
