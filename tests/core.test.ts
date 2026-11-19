@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { parseCommand } from '../src/core/commandParser.js';
 import { calculateBill } from '../src/core/billCalculator.js';
-import { rankDateWindows } from '../src/core/dateMatcher.js';
+import { rankDateWindows, findMutualFreeStreaks } from '../src/core/dateMatcher.js';
 import { calculateSettlements } from '../src/core/settlementEngine.js';
 import { getDueReminderKey, buildReminderText } from '../src/core/reminderEngine.js';
 import {
@@ -176,6 +176,34 @@ describe('dateMatcher', () => {
     expect(windows[0].startDate).toBe('2026-12-03');
     expect(windows[0].endDate).toBe('2026-12-05');
     expect(windows[0].tier).toBe(1);
+  });
+
+  it('finds all maximal consecutive streaks where every member is FREE', () => {
+    const streaks = findMutualFreeStreaks({
+      startDate: '2026-11-18',
+      endDate: '2026-11-30',
+      memberIds: [1, 2],
+      records: [
+        // Streak 1: 19-23 (5 days)
+        ...[19, 20, 21, 22, 23].flatMap((d) => [
+          { memberId: 1, date: `2026-11-${d}`, status: 'FREE' as const },
+          { memberId: 2, date: `2026-11-${d}`, status: 'FREE' as const },
+        ]),
+        // 24: member 2 busy
+        { memberId: 1, date: '2026-11-24', status: 'FREE' },
+        { memberId: 2, date: '2026-11-24', status: 'BUSY' },
+        // Streak 2: 28-29 (2 days)
+        ...[28, 29].flatMap((d) => [
+          { memberId: 1, date: `2026-11-${d}`, status: 'FREE' as const },
+          { memberId: 2, date: `2026-11-${d}`, status: 'FREE' as const },
+        ]),
+      ],
+    });
+
+    expect(streaks).toEqual([
+      { startDate: '2026-11-19', endDate: '2026-11-23', daysCount: 5 },
+      { startDate: '2026-11-28', endDate: '2026-11-29', daysCount: 2 },
+    ]);
   });
 });
 

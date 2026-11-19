@@ -1,6 +1,13 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME, GRADIENT_HEADER, pillBadge } from './theme.js';
-import { enumerateDates, formatThaiRange, type AvailabilityRecord, type WindowMatch } from '../core/dateMatcher.js';
+import {
+  enumerateDates,
+  findMutualFreeStreaks,
+  formatThaiRange,
+  type AvailabilityRecord,
+  type MutualFreeStreak,
+  type WindowMatch,
+} from '../core/dateMatcher.js';
 
 function compressDayNumbers(days: number[]): string {
   if (days.length === 0) return '-';
@@ -146,15 +153,54 @@ export function buildCalendarPollFlex(params: {
   });
 
   const memberNameMap = new Map(params.members.map((m) => [m.id, m.displayName]));
+  const mutualStreaks: MutualFreeStreak[] = findMutualFreeStreaks({
+    startDate: params.startDate,
+    endDate: params.endDate,
+    memberIds: params.members.map((m) => m.id),
+    records: params.records,
+  });
   const best = params.topWindows[0];
   const pollRangeText = formatThaiRange(params.startDate, params.endDate, params.durationDays);
-  let bestLabel = pollRangeText;
-  if (best) {
-    const missingNames = [...best.busyMemberIds, ...best.pendingMemberIds]
-      .map((id) => memberNameMap.get(id))
-      .filter(Boolean);
-    const suffix = missingNames.length > 0 ? ` • รอ: ${missingNames.join(', ')}` : ' • ครบทุกคน';
-    bestLabel = `แนะนำ: ${formatThaiRange(best.startDate, best.endDate, params.durationDays)} (${best.freeMemberIds.length}/${totalMembers}${suffix})`;
+
+  const recommendContents: messagingApi.FlexComponent[] = [];
+  if (mutualStreaks.length > 0) {
+    recommendContents.push({
+      type: 'text',
+      text: `ทุกคนว่างตรงกัน (${mutualStreaks.length} ช่วง) คุยตกลงกันแล้วค่อยล็อกวัน:`,
+      size: 'xs',
+      color: THEME.velvetGrape,
+      wrap: true,
+    });
+    for (const streak of mutualStreaks) {
+      recommendContents.push({
+        type: 'text',
+        text: `• ${formatThaiRange(streak.startDate, streak.endDate)} (${streak.daysCount} วัน)`,
+        size: 'xs',
+        color: THEME.primary,
+        wrap: true,
+      });
+    }
+  } else {
+    recommendContents.push({
+      type: 'text',
+      text: 'ยังไม่มีวันที่ทุกคนว่างตรงกัน 100%',
+      size: 'xs',
+      color: THEME.velvetGrape,
+      wrap: true,
+    });
+    if (best) {
+      const missingNames = [...best.busyMemberIds, ...best.pendingMemberIds]
+        .map((id) => memberNameMap.get(id))
+        .filter(Boolean);
+      const suffix = missingNames.length > 0 ? ` • รอ: ${missingNames.join(', ')}` : '';
+      recommendContents.push({
+        type: 'text',
+        text: `• ใกล้เคียงสุด: ${formatThaiRange(best.startDate, best.endDate, params.durationDays)} (${best.freeMemberIds.length}/${totalMembers}${suffix})`,
+        size: 'xxs',
+        color: THEME.textSecondary,
+        wrap: true,
+      });
+    }
   }
 
   return {
@@ -226,15 +272,8 @@ export function buildCalendarPollFlex(params: {
             borderColor: THEME.primary,
             cornerRadius: '12px',
             paddingAll: '10px',
-            contents: [
-              {
-                type: 'text',
-                text: bestLabel,
-                size: 'xs',
-                color: THEME.velvetGrape,
-                wrap: true,
-              },
-            ],
+            spacing: 'xs',
+            contents: recommendContents,
           },
         ],
       },
@@ -253,25 +292,21 @@ export function buildCalendarPollFlex(params: {
                   height: 'sm',
                   action: {
                     type: 'uri',
-                    label: 'เลือกวันว่างในเว็บ',
+                    label: 'เลือกวันว่าง / ล็อกวันในเว็บ',
                     uri: `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?pollId=${params.pollId}`,
                   },
                 },
-                ...(best
-                  ? [
-                      {
-                        type: 'button' as const,
-                        style: 'secondary' as const,
-                        color: THEME.lavenderHaze,
-                        height: 'sm' as const,
-                        action: {
-                          type: 'postback' as const,
-                          label: `ล็อกวัน ${formatThaiRange(best.startDate, best.endDate)}`,
-                          data: `action=lock_date&pollId=${params.pollId}&start=${best.startDate}&end=${best.endDate}`,
-                        },
-                      },
-                    ]
-                  : []),
+                ...mutualStreaks.slice(0, 2).map((streak) => ({
+                  type: 'button' as const,
+                  style: 'secondary' as const,
+                  color: THEME.lavenderHaze,
+                  height: 'sm' as const,
+                  action: {
+                    type: 'postback' as const,
+                    label: `ล็อกวัน ${formatThaiRange(streak.startDate, streak.endDate)}`,
+                    data: `action=lock_date&pollId=${params.pollId}&start=${streak.startDate}&end=${streak.endDate}`,
+                  },
+                })),
               ],
             },
           }),

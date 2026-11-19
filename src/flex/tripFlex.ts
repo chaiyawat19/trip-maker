@@ -180,34 +180,47 @@ export function buildTripCreatedFlex(params: {
     });
   }
 
+  const pickWebUrl = `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?tripId=${params.tripId}`;
+
   const dateText =
     params.lockedStartDate && params.lockedEndDate
       ? formatThaiRange(params.lockedStartDate, params.lockedEndDate)
       : params.status === 'LOCKED'
-        ? 'ยังไม่ได้กำหนด (พิมพ์ /ตั้งวัน 19-21 พ.ย.)'
-        : 'รอนัดวันว่าง (พิมพ์ /นัด 19-21 พ.ย. 3วัน)';
+        ? 'ยังไม่ได้กำหนด (กดปุ่มเลือกวันที่ในเว็บด้านล่าง)'
+        : 'รอนัดวันว่าง (กดปุ่มเลือกวันที่ในเว็บด้านล่าง)';
 
   const nextStepsText =
     params.status === 'LOCKED'
       ? [
-          '• /ตั้งวัน 19-21 พ.ย. — กำหนดหรือเปลี่ยนวันเดินทาง',
+          '• กด "เลือกวันที่ในเว็บ" ด้านล่างเพื่อกำหนดหรือเปลี่ยนวันเดินทาง',
           '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
           '• /หาร — เปิดเว็บ LIFF จดบิลหารเงิน & สแกน QR พร้อมเพย์',
           '• /สรุปยอด — ดูยอดโอนสุทธิและเคลียร์เงิน',
           '• /ปิดทริป — ปิดทริปเมื่อเคลียร์ยอดครบแล้ว',
         ].join('\n')
       : [
-          '• /นัด 19-21 พ.ย. 3วัน — สร้างปฏิทินหาวันว่างในเว็บ',
-          '• /เริ่มทริป 19-21 พ.ย. — ข้ามการโหวตและเริ่มทริปทันที',
+          '• กด "เลือกวันที่ในเว็บ" ด้านล่างเพื่อเลือกช่วงวันและวันว่างของทุกคน',
           '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
           '• /เปลี่ยนชื่อทริป <ชื่อใหม่> — แก้ไขชื่อทริป',
+          '• /เริ่มทริป — ข้ามการโหวตเพื่อเปิดหารเงินทันที',
         ].join('\n');
 
   const footerButtons: messagingApi.FlexButton[] = [
     {
       type: 'button',
-      style: params.status === 'LOCKED' ? 'secondary' : 'primary',
-      color: params.status === 'LOCKED' ? THEME.lavenderHaze : THEME.primary,
+      style: 'primary',
+      color: THEME.primary,
+      height: 'sm',
+      action: {
+        type: 'uri',
+        label: params.status === 'LOCKED' ? 'เลือก / เปลี่ยนวันเดินทางในเว็บ' : 'เลือกวันที่ในเว็บ',
+        uri: pickWebUrl,
+      },
+    },
+    {
+      type: 'button',
+      style: 'secondary',
+      color: THEME.lavenderHaze,
       height: 'sm',
       action: {
         type: 'postback',
@@ -221,24 +234,12 @@ export function buildTripCreatedFlex(params: {
     footerButtons.push({
       type: 'button',
       style: 'secondary',
-      color: THEME.lavenderHaze,
+      color: THEME.lavenderTint,
       height: 'sm',
       action: {
         type: 'postback',
         label: 'เริ่มทริปเลย',
         data: `action=start_trip_now&tripId=${params.tripId}`,
-      },
-    });
-  } else if (params.status === 'LOCKED') {
-    footerButtons.unshift({
-      type: 'button',
-      style: 'primary',
-      color: THEME.primary,
-      height: 'sm',
-      action: {
-        type: 'uri',
-        label: 'เปิดเว็บจัดการบิล (/หาร)',
-        uri: buildLiffBillsUrl(params.tripId),
       },
     });
   }

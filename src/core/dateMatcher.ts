@@ -123,3 +123,56 @@ export function rankDateWindows(params: {
 
   return windows.sort((a, b) => b.score - a.score || a.startDate.localeCompare(b.startDate));
 }
+
+export interface MutualFreeStreak {
+  startDate: string;
+  endDate: string;
+  daysCount: number;
+}
+
+/**
+ * Finds all maximal consecutive date ranges where EVERY member in `memberIds`
+ * has status === 'FREE'.
+ */
+export function findMutualFreeStreaks(params: {
+  startDate: string;
+  endDate: string;
+  memberIds: number[];
+  records: AvailabilityRecord[];
+}): MutualFreeStreak[] {
+  const { startDate, endDate, memberIds, records } = params;
+  if (memberIds.length === 0) return [];
+
+  const allDates = enumerateDates(startDate, endDate);
+  const lookup = new Map<string, Exclude<AvailabilityStatus, 'PENDING'>>();
+  for (const r of records) {
+    lookup.set(`${r.memberId}:${r.date}`, r.status);
+  }
+
+  const streaks: MutualFreeStreak[] = [];
+  let curStart: string | null = null;
+  let curEnd: string | null = null;
+  let curCount = 0;
+
+  for (const d of allDates) {
+    const allFree = memberIds.every((mId) => lookup.get(`${mId}:${d}`) === 'FREE');
+    if (allFree) {
+      if (!curStart) {
+        curStart = d;
+      }
+      curEnd = d;
+      curCount++;
+    } else if (curStart && curEnd) {
+      streaks.push({ startDate: curStart, endDate: curEnd, daysCount: curCount });
+      curStart = null;
+      curEnd = null;
+      curCount = 0;
+    }
+  }
+
+  if (curStart && curEnd) {
+    streaks.push({ startDate: curStart, endDate: curEnd, daysCount: curCount });
+  }
+
+  return streaks;
+}

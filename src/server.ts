@@ -91,9 +91,44 @@ app.get('/health', async () => {
 });
 
 app.get('/pick', async (request, reply) => {
-  const query = request.query as { pollId?: string };
-  const pollId = Number(query.pollId);
-  const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
+  const query = request.query as { pollId?: string; tripId?: string };
+  const pollIdParam = Number(query.pollId || 0);
+  const tripIdParam = Number(query.tripId || 0);
+
+  let poll = pollIdParam
+    ? db.select().from(datePolls).where(eq(datePolls.id, pollIdParam)).get()
+    : undefined;
+
+  if (!poll && tripIdParam) {
+    const tripExists = db.select().from(trips).where(eq(trips.id, tripIdParam)).get();
+    if (!tripExists) return reply.code(404).send('Trip not found');
+
+    poll = db
+      .select()
+      .from(datePolls)
+      .where(eq(datePolls.tripId, tripIdParam))
+      .orderBy(desc(datePolls.id))
+      .get();
+
+    if (!poll) {
+      const startIso = getBangkokDateIso();
+      const endDt = new Date(`${startIso}T00:00:00Z`);
+      endDt.setUTCDate(endDt.getUTCDate() + 29);
+      const endIso = endDt.toISOString().slice(0, 10);
+      poll = db
+        .insert(datePolls)
+        .values({
+          tripId: tripIdParam,
+          startDate: startIso,
+          endDate: endIso,
+          durationDays: 1,
+          createdAt: new Date().toISOString(),
+        })
+        .returning()
+        .get();
+    }
+  }
+
   if (!poll) return reply.code(404).send('Poll not found');
   const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
   if (!trip) return reply.code(404).send('Trip not found');
@@ -102,6 +137,7 @@ app.get('/pick', async (request, reply) => {
   const rows = db.select().from(availabilities).where(eq(availabilities.pollId, poll.id)).all();
 
   const html = renderPickPage({
+    tripId: trip.id,
     pollId: poll.id,
     tripName: trip.name,
     tripStatus: trip.status,
@@ -116,6 +152,86 @@ app.get('/pick', async (request, reply) => {
     })),
   });
   return reply.type('text/html; charset=utf-8').send(html);
+});
+
+app.post('/api/pick/range', async (request, reply) => {
+  const body = request.body as {
+    pollId: number;
+    startDate: string;
+    endDate: string;
+  };
+  if (!body.startDate || !body.endDate || body.startDate > body.endDate) {
+    return reply.code(400).send({ error: 'ช่วงวันที่ไม่ถูกต้อง' });
+  }
+  const poll = db.select().from(datePolls).where(eq(datePolls.id, body.pollId)).get();
+  if (!poll) return reply.code(404).send({ error: 'Poll not found' });
+  const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+  if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+  if (trip.status === 'COMPLETED') {
+    return reply.code(400).send({ error: 'ทริปนี้ปิดไปแล้ว ไม่สามารถแก้ไขช่วงวันที่ได้' });
+  }
+
+  db.update(datePolls)
+    .set({ startDate: body.startDate, endDate: body.endDate })
+    .where(eq(datePolls.id, poll.id))
+    .run();
+
+  const flex = buildPollFlexForId(poll.id, 'FREE');
+  if (flex && trip.groupId) {
+    try {
+      await lineClient.pushMessage({ to: trip.groupId, messages: [flex] });
+    } catch (err) {
+      request.log.error(err, 'Failed to push poll range update');
+    }
+  }
+
+  return { ok: true };
+});
+
+app.post('/api/trips/:tripId/lock-dates', async (request, reply) => {
+  const { tripId: tripIdStr } = request.params as { tripId: string };
+  const tripId = Number(tripIdStr);
+  const body = request.body as { startDate: string; endDate: string };
+  if (!body.startDate || !body.endDate || body.startDate > body.endDate) {
+    return reply.code(400).send({ error: 'ช่วงวันที่ไม่ถูกต้อง' });
+  }
+  const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+  if (trip.status === 'COMPLETED') {
+    return reply.code(400).send({ error: 'ทริปนี้ปิดไปแล้ว ไม่สามารถล็อกวันได้' });
+  }
+
+  db.update(trips)
+    .set({
+      status: 'LOCKED',
+      lockedStartDate: body.startDate,
+      lockedEndDate: body.endDate,
+    })
+    .where(eq(trips.id, trip.id))
+    .run();
+
+  const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+  if (trip.groupId) {
+    try {
+      await lineClient.pushMessage({
+        to: trip.groupId,
+        messages: [
+          buildTripCreatedFlex({
+            tripId: trip.id,
+            tripName: trip.name,
+            status: 'LOCKED',
+            lockedStartDate: body.startDate,
+            lockedEndDate: body.endDate,
+            members,
+          }),
+        ],
+      });
+    } catch (err) {
+      request.log.error(err, 'Failed to push locked trip dates');
+    }
+  }
+
+  return { ok: true };
 });
 
 app.post('/api/pick', async (request, reply) => {
