@@ -90,3 +90,9 @@ export const tripReminders = sqliteTable('trip_reminders', {
   reminderKey: text('reminder_key').notNull(), // D-3 | D-1 | D-0
   sentAt: text('sent_at').notNull(),
 });
+
+export const userPaymentProfiles = sqliteTable('user_payment_profiles', {
+  lineUserId: text('line_user_id').primaryKey(),
+  promptpayId: text('promptpay_id').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

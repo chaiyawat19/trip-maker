@@ -4,6 +4,11 @@ import { calculateBill } from '../src/core/billCalculator.js';
 import { rankDateWindows } from '../src/core/dateMatcher.js';
 import { calculateSettlements } from '../src/core/settlementEngine.js';
 import { getDueReminderKey, buildReminderText } from '../src/core/reminderEngine.js';
+import {
+  normalizePromptPayId,
+  maskPromptPayId,
+  generatePromptPayPayload,
+} from '../src/core/promptpay.js';
 
 describe('commandParser', () => {
   it('parses /สร้างทริป', () => {
@@ -214,5 +219,26 @@ describe('reminderEngine', () => {
     const msg = buildReminderText('เชียงใหม่', '2026-12-12', '2026-12-14', 'D-3');
     expect(msg).toContain('12-14 ธ.ค.');
     expect(msg).toContain('3 วัน');
+  });
+});
+
+describe('promptpay & LIFF bill commands', () => {
+  it('parses bare /หาร as OPEN_BILL_BUILDER and /พร้อมเพย์', () => {
+    expect(parseCommand('/หาร')).toEqual({ type: 'OPEN_BILL_BUILDER', title: 'จัดการบิล' });
+    expect(parseCommand('/พร้อมเพย์ 081-234-5678')).toEqual({
+      type: 'SET_PROMPTPAY',
+      promptpayId: '081-234-5678',
+    });
+  });
+
+  it('normalizes, masks, and generates valid PromptPay EMVCo payload', () => {
+    expect(normalizePromptPayId('081-234-5678')).toBe('0812345678');
+    expect(normalizePromptPayId('12345')).toBeNull();
+    expect(maskPromptPayId('0812345678')).toBe('081-xxx-5678');
+    expect(maskPromptPayId('1234567890123')).toBe('1-xxxx-xxxxx-12-3');
+
+    const payload = generatePromptPayPayload('081-234-5678', 350.5);
+    expect(payload.startsWith('000201')).toBe(true);
+    expect(payload).toContain('350.50');
   });
 });

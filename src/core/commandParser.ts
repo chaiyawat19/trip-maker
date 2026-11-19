@@ -34,6 +34,7 @@ export type ParsedCommand =
   | { type: 'OPEN_BILL_BUILDER'; title: string }
   | { type: 'LIST_BILLS' }
   | { type: 'SETTLE_SUMMARY' }
+  | { type: 'SET_PROMPTPAY'; promptpayId: string }
   | { type: 'HELP' }
   | { type: 'UNKNOWN' };
 
@@ -123,6 +124,8 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
     case '/สรุปยอด':
     case '/เคลียร์ยอด':
       return { type: 'SETTLE_SUMMARY' };
+    case '/พร้อมเพย์':
+      return { type: 'SET_PROMPTPAY', promptpayId: rest };
     case '/วิธีใช้':
     case '/help':
       return { type: 'HELP' };
@@ -173,10 +176,12 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
       }
       return dates.length > 0 ? { type: 'SET_GUEST_AVAILABILITY', guestName, status, dates } : { type: 'HELP' };
     }
+    case '/หาร':
+      if (!rest) return { type: 'OPEN_BILL_BUILDER', title: 'จัดการบิล' };
+      return parseQuickSplit(rest);
     case '/หารรวม':
     case '/หารเพิ่ม':
     case '/หารรวมเพิ่ม':
-    case '/หาร':
       return parseQuickSplit(rest);
     case '/หารเอง':
       return parseExactSplit(rest);

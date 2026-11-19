@@ -6,6 +6,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { messagingApi, type WebhookEvent } from '@line/bot-sdk';
 import { eq, and, desc } from 'drizzle-orm';
+import QRCode from 'qrcode';
 
 import { createDb } from './db/index.js';
 import {
@@ -19,12 +20,18 @@ import {
   billItemShares,
   settlements,
   tripReminders,
+  userPaymentProfiles,
 } from './db/schema.js';
 import { parseCommand } from './core/commandParser.js';
 import { enumerateDates, rankDateWindows, type AvailabilityRecord } from './core/dateMatcher.js';
 import { calculateBill } from './core/billCalculator.js';
 import { calculateSettlements } from './core/settlementEngine.js';
 import { getBangkokDateIso, getDueReminderKey, buildReminderText } from './core/reminderEngine.js';
+import {
+  normalizePromptPayId,
+  maskPromptPayId,
+  generatePromptPayPayload,
+} from './core/promptpay.js';
 import {
   buildWelcomeFlex,
   buildTripCreatedFlex,
@@ -33,14 +40,20 @@ import {
   buildMembersFlex,
 } from './flex/tripFlex.js';
 import { buildCalendarPollFlex } from './flex/calendarFlex.js';
-import { buildBillReceiptFlex, buildBillMenuFlex } from './flex/billFlex.js';
+import {
+  buildBillReceiptFlex,
+  buildBillMenuFlex,
+  buildOpenBillsLiffFlex,
+} from './flex/billFlex.js';
 import { buildSettlementFlex } from './flex/settlementFlex.js';
 import { buildHelpFlex } from './flex/helpFlex.js';
 import { renderPickPage } from './web/pickPage.js';
+import { renderBillsLiffPage } from './web/billsLiffPage.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
 const CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN || '';
+const LIFF_ID = (process.env.LIFF_ID || '').trim();
 
 const { db } = createDb();
 const lineClient = new messagingApi.MessagingApiClient({
@@ -134,6 +147,293 @@ app.post('/api/pick', async (request, reply) => {
   }
 
   return { ok: true };
+});
+
+app.get('/liff/bills', async (request, reply) => {
+  const query = request.query as { tripId?: string; 'liff.state'?: string };
+  let tripId = Number(query.tripId || 0);
+  if (!tripId && query['liff.state']) {
+    const rawState = query['liff.state'].startsWith('?')
+      ? query['liff.state'].slice(1)
+      : query['liff.state'];
+    tripId = Number(new URLSearchParams(rawState).get('tripId') || 0);
+  }
+  const html = renderBillsLiffPage({ tripId, liffId: LIFF_ID });
+  return reply.type('text/html; charset=utf-8').send(html);
+});
+
+app.get('/api/trips/:tripId/bills-state', async (request, reply) => {
+  const { tripId: tripIdStr } = request.params as { tripId: string };
+  const tripId = Number(tripIdStr);
+  const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+
+  const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+  const memberMap = new Map(members.map((m) => [m.id, m.displayName]));
+
+  const ppRows = db.select().from(userPaymentProfiles).all();
+  const ppByUser = new Map(ppRows.map((p) => [p.lineUserId, p.promptpayId]));
+
+  const enrichedMembers = members.map((m) => {
+    const pp = m.lineUserId ? ppByUser.get(m.lineUserId) ?? null : null;
+    return {
+      id: m.id,
+      displayName: m.displayName,
+      lineUserId: m.lineUserId,
+      isGuest: m.isGuest,
+      maskedPromptPay: pp ? maskPromptPayId(pp) : null,
+    };
+  });
+
+  const tripBills = db.select().from(bills).where(eq(bills.tripId, tripId)).orderBy(desc(bills.id)).all();
+  const enrichedBills = tripBills.map((b) => {
+    const items = db.select().from(billItems).where(eq(billItems.billId, b.id)).all();
+    const calcItems = items.map((it) => {
+      const shares = db.select().from(billItemShares).where(eq(billItemShares.billItemId, it.id)).all();
+      const exactAmounts: Record<number, number> = {};
+      for (const s of shares) {
+        if (s.exactAmount !== null && s.exactAmount !== undefined) {
+          exactAmounts[s.memberId] = s.exactAmount;
+        }
+      }
+      return {
+        name: it.name,
+        amount: it.amount,
+        isAddon: it.isAddon,
+        participantIds: shares.map((s) => s.memberId),
+        ...(Object.keys(exactAmounts).length > 0 ? { exactAmounts } : {}),
+      };
+    });
+    const calc = calculateBill({
+      items: calcItems,
+      vatPercent: b.vatPercent,
+      serviceChargePercent: b.serviceChargePercent,
+      discountAmount: b.discountAmount,
+    });
+    return {
+      id: b.id,
+      title: b.title,
+      splitMode: b.splitMode,
+      totalAmount: b.totalAmount,
+      payerMemberId: b.payerMemberId,
+      payerName: memberMap.get(b.payerMemberId) || 'สมาชิก',
+      createdAt: b.createdAt,
+      shares: calc.shares.map((s) => ({
+        memberId: s.memberId,
+        displayName: memberMap.get(s.memberId) || 'สมาชิก',
+        netTotal: s.netTotal,
+      })),
+    };
+  });
+
+  const settlementRows = syncSettlementRows(tripId);
+  const memberById = new Map(members.map((m) => [m.id, m]));
+  const transfers = settlementRows.map((s) => {
+    const toMember = memberById.get(s.toMemberId);
+    const toPp = toMember?.lineUserId ? ppByUser.get(toMember.lineUserId) ?? null : null;
+    return {
+      settlementId: s.id,
+      fromMemberId: s.fromMemberId,
+      toMemberId: s.toMemberId,
+      fromName: memberById.get(s.fromMemberId)?.displayName || 'เพื่อน',
+      toName: toMember?.displayName || 'เพื่อน',
+      amount: s.amount,
+      status: s.status,
+      toPromptPay: toPp,
+      toMaskedPromptPay: toPp ? maskPromptPayId(toPp) : null,
+    };
+  });
+
+  return {
+    trip: { id: trip.id, name: trip.name, status: trip.status },
+    members: enrichedMembers,
+    bills: enrichedBills,
+    transfers,
+  };
+});
+
+app.post('/api/trips/:tripId/bills', async (request, reply) => {
+  const { tripId: tripIdStr } = request.params as { tripId: string };
+  const tripId = Number(tripIdStr);
+  const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+  if (trip.status === 'PLANNING') {
+    return reply.code(400).send({ error: 'ทริปยังไม่ได้ล็อกวันหรือเริ่มทริป' });
+  }
+  if (trip.status === 'COMPLETED') {
+    return reply.code(400).send({ error: 'ทริปนี้ปิดไปแล้ว' });
+  }
+
+  const body = request.body as {
+    title: string;
+    payerMemberId: number;
+    splitMode: string;
+    items: Array<{
+      name: string;
+      amount: number;
+      isAddon?: boolean;
+      participantIds: number[];
+      exactAmounts?: Record<number, number>;
+    }>;
+    vatPercent?: number;
+    serviceChargePercent?: number;
+    discountAmount?: number;
+  };
+
+  if (!body.title?.trim() || !Array.isArray(body.items) || body.items.length === 0) {
+    return reply.code(400).send({ error: 'ข้อมูลบิลไม่ครบถ้วน' });
+  }
+
+  const calc = calculateBill({
+    items: body.items,
+    vatPercent: body.vatPercent ?? 0,
+    serviceChargePercent: body.serviceChargePercent ?? 0,
+    discountAmount: body.discountAmount ?? 0,
+  });
+
+  const now = new Date().toISOString();
+  const bill = db
+    .insert(bills)
+    .values({
+      tripId,
+      title: body.title.trim(),
+      payerMemberId: body.payerMemberId,
+      splitMode: body.splitMode || 'EQUAL',
+      vatPercent: body.vatPercent ?? 0,
+      serviceChargePercent: body.serviceChargePercent ?? 0,
+      discountAmount: body.discountAmount ?? 0,
+      totalAmount: calc.grandTotal,
+      createdAt: now,
+    })
+    .returning()
+    .get();
+
+  for (const item of body.items) {
+    const bi = db
+      .insert(billItems)
+      .values({ billId: bill.id, name: item.name, amount: item.amount, isAddon: Boolean(item.isAddon) })
+      .returning()
+      .get();
+    for (const mId of item.participantIds) {
+      db.insert(billItemShares)
+        .values({
+          billItemId: bi.id,
+          memberId: mId,
+          exactAmount: item.exactAmounts ? item.exactAmounts[mId] : null,
+          weight: 1,
+        })
+        .run();
+    }
+  }
+
+  syncSettlementRows(tripId);
+
+  if (trip.groupId) {
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+    const memberMap = new Map(members.map((m) => [m.id, m.displayName]));
+    const receipt = buildBillReceiptFlex({
+      tripId,
+      billId: bill.id,
+      title: bill.title,
+      payerName: memberMap.get(body.payerMemberId) || 'สมาชิก',
+      grandTotal: calc.grandTotal,
+      vatPercent: body.vatPercent ?? 0,
+      serviceChargePercent: body.serviceChargePercent ?? 0,
+      shares: calc.shares.map((s) => ({
+        displayName: memberMap.get(s.memberId) || 'สมาชิก',
+        netTotal: s.netTotal,
+      })),
+    });
+    try {
+      await lineClient.pushMessage({ to: trip.groupId, messages: [receipt] });
+    } catch (err) {
+      request.log.error(err, 'Failed to push bill receipt from LIFF');
+    }
+  }
+
+  return { ok: true, billId: bill.id };
+});
+
+app.delete('/api/trips/:tripId/bills/:billId', async (request, reply) => {
+  const { tripId: tripIdStr, billId: billIdStr } = request.params as { tripId: string; billId: string };
+  const tripId = Number(tripIdStr);
+  const billId = Number(billIdStr);
+  const existing = db.select().from(bills).where(and(eq(bills.id, billId), eq(bills.tripId, tripId))).get();
+  if (!existing) return reply.code(404).send({ error: 'Bill not found' });
+
+  const items = db.select().from(billItems).where(eq(billItems.billId, billId)).all();
+  for (const it of items) {
+    db.delete(billItemShares).where(eq(billItemShares.billItemId, it.id)).run();
+  }
+  db.delete(billItems).where(eq(billItems.billId, billId)).run();
+  db.delete(bills).where(eq(bills.id, billId)).run();
+
+  syncSettlementRows(tripId);
+  return { ok: true };
+});
+
+app.post('/api/trips/:tripId/settlements/:settlementId/toggle', async (request, reply) => {
+  const { tripId: tripIdStr, settlementId: sIdStr } = request.params as { tripId: string; settlementId: string };
+  const tripId = Number(tripIdStr);
+  const settlementId = Number(sIdStr);
+  const row = db
+    .select()
+    .from(settlements)
+    .where(and(eq(settlements.id, settlementId), eq(settlements.tripId, tripId)))
+    .get();
+  if (!row) return reply.code(404).send({ error: 'Settlement not found' });
+
+  const nextStatus =
+    row.status === 'PENDING'
+      ? 'WAITING_CONFIRM'
+      : row.status === 'WAITING_CONFIRM'
+        ? 'CONFIRMED'
+        : 'PENDING';
+
+  db.update(settlements)
+    .set({ status: nextStatus, updatedAt: new Date().toISOString() })
+    .where(eq(settlements.id, settlementId))
+    .run();
+
+  return { ok: true, status: nextStatus };
+});
+
+app.post('/api/promptpay', async (request, reply) => {
+  const body = request.body as { lineUserId?: string; promptpayId?: string };
+  if (!body.lineUserId || !body.promptpayId) {
+    return reply.code(400).send({ error: 'กรุณาระบุข้อมูลให้ครบ' });
+  }
+  const normalized = normalizePromptPayId(body.promptpayId);
+  if (!normalized) {
+    return reply.code(400).send({ error: 'กรุณากรอกเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก' });
+  }
+  const now = new Date().toISOString();
+  db.insert(userPaymentProfiles)
+    .values({ lineUserId: body.lineUserId, promptpayId: normalized, updatedAt: now })
+    .onConflictDoUpdate({
+      target: userPaymentProfiles.lineUserId,
+      set: { promptpayId: normalized, updatedAt: now },
+    })
+    .run();
+
+  return { ok: true, masked: maskPromptPayId(normalized) };
+});
+
+app.get('/api/qr', async (request, reply) => {
+  const query = request.query as { promptpay?: string; amount?: string };
+  const normalized = normalizePromptPayId(query.promptpay || '');
+  if (!normalized) {
+    return reply.code(400).send({ error: 'Invalid PromptPay ID' });
+  }
+  const amount = query.amount ? Number(query.amount) : undefined;
+  const payload = generatePromptPayPayload(normalized, amount);
+  const pngBuffer = await QRCode.toBuffer(payload, {
+    type: 'png',
+    width: 420,
+    margin: 2,
+    color: { dark: '#36255C', light: '#FFFFFF' },
+  });
+  return reply.type('image/png').send(pngBuffer);
 });
 
 app.post('/webhook', async (request, reply) => {
@@ -286,11 +586,9 @@ function buildPollFlexForId(pollId: number, activeMode: 'FREE' | 'MAYBE' | 'BUSY
   });
 }
 
-function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
+function syncSettlementRows(tripId: number) {
   const now = new Date().toISOString();
   const tripBills = db.select().from(bills).where(eq(bills.tripId, tripId)).all();
-  const allMembers = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
-  const memberMap = new Map(allMembers.map((m) => [m.id, m.displayName]));
 
   const summaries = tripBills.map((b) => {
     const items = db.select().from(billItems).where(eq(billItems.billId, b.id)).all();
@@ -326,7 +624,6 @@ function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
   const res = calculateSettlements(summaries);
   const existingRows = db.select().from(settlements).where(eq(settlements.tripId, tripId)).all();
 
-  // Check if computed transfers match existing rows (preserve PENDING/WAITING_CONFIRM/CONFIRMED)
   const key = (fromId: number, toId: number, amt: number) => `${fromId}->${toId}:${amt}`;
   const existingMap = new Map(existingRows.map((r) => [key(r.fromMemberId, r.toMemberId, r.amount), r]));
   const computedKeys = new Set(res.transfers.map((t) => key(t.fromMemberId, t.toMemberId, t.amount)));
@@ -354,6 +651,14 @@ function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
         .get();
     });
   }
+
+  return finalRows;
+}
+
+function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
+  const allMembers = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+  const memberMap = new Map(allMembers.map((m) => [m.id, m.displayName]));
+  const finalRows = syncSettlementRows(tripId);
 
   return buildSettlementFlex({
     tripId,
@@ -405,6 +710,42 @@ async function handleTextMessage(
 
   if (parsed.type === 'HELP') {
     await lineClient.replyMessage({ replyToken: event.replyToken, messages: [buildHelpFlex()] });
+    return;
+  }
+
+  if (parsed.type === 'SET_PROMPTPAY' && userId) {
+    if (!parsed.promptpayId) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          {
+            type: 'text',
+            text: 'วิธีผูกพร้อมเพย์: พิมพ์ /พร้อมเพย์ ตามด้วยเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก\nตัวอย่าง: /พร้อมเพย์ 0812345678\n(พิมพ์ในแชทส่วนตัว 1-on-1 กับบอทเพื่อความเป็นส่วนตัวได้ครับ)',
+          },
+        ],
+      });
+      return;
+    }
+    const normalized = normalizePromptPayId(parsed.promptpayId);
+    if (!normalized) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'รูปแบบพร้อมเพย์ไม่ถูกต้อง กรุณาใส่เบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลักครับ' }],
+      });
+      return;
+    }
+    db.insert(userPaymentProfiles)
+      .values({ lineUserId: userId, promptpayId: normalized, updatedAt: now })
+      .onConflictDoUpdate({
+        target: userPaymentProfiles.lineUserId,
+        set: { promptpayId: normalized, updatedAt: now },
+      })
+      .run();
+
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [{ type: 'text', text: `บันทึกพร้อมเพย์ (${maskPromptPayId(normalized)}) เรียบร้อยครับ! เพื่อนสามารถสแกน QR โอนเงินให้คุณได้ทันทีในหน้าเว็บ LIFF` }],
+    });
     return;
   }
 
@@ -872,6 +1213,7 @@ async function handleTextMessage(
       replyToken: event.replyToken,
       messages: [
         buildBillReceiptFlex({
+          tripId: trip.id,
           billId: bill.id,
           title: bill.title,
           payerName: payer.displayName,
@@ -888,12 +1230,50 @@ async function handleTextMessage(
     return;
   }
 
-  if (parsed.type === 'OPEN_BILL_BUILDER' || parsed.type === 'LIST_BILLS') {
+  if (parsed.type === 'OPEN_BILL_BUILDER') {
+    if (trip.status === 'PLANNING') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          {
+            type: 'text',
+            text: `ทริป "${trip.name}" ยังไม่ได้ล็อกวัน/เริ่มทริปเลยครับ กรุณาล็อกวันจากการหาวันว่าง หรือพิมพ์ /เริ่มทริป ก่อนจดบิลครับ`,
+          },
+        ],
+      });
+      return;
+    }
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ปิดทริปไปแล้วครับ พิมพ์ /สร้างทริป เพื่อเริ่มทริปใหม่ได้เลย` }],
+      });
+      return;
+    }
+
+    const tripBills = db.select().from(bills).where(eq(bills.tripId, trip.id)).all();
+    const totalSpend = tripBills.reduce((s, b) => s + b.totalAmount, 0);
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildOpenBillsLiffFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          billCount: tripBills.length,
+          totalSpend,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'LIST_BILLS') {
     const tripBills = db.select().from(bills).where(eq(bills.tripId, trip.id)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [
         buildBillMenuFlex({
+          tripId: trip.id,
           tripName: trip.name,
           tripStatus: trip.status,
           bills: tripBills.map((b) => ({

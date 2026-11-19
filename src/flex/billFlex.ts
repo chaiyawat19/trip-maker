@@ -1,7 +1,82 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
+import { buildLiffBillsUrl } from '../core/promptpay.js';
+
+export function buildOpenBillsLiffFlex(params: {
+  tripId: number;
+  tripName: string;
+  billCount: number;
+  totalSpend: number;
+}): messagingApi.FlexMessage {
+  const liffUrl = buildLiffBillsUrl(params.tripId);
+  return {
+    type: 'flex',
+    altText: `จัดการบิลและ QR พร้อมเพย์ • ${params.tripName}`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: THEME.lavenderTint,
+        paddingAll: '16px',
+        contents: [
+          { type: 'text', text: `จัดการบิล & QR พร้อมเพย์ • ${params.tripName}`, size: 'xs', color: THEME.primary },
+          {
+            type: 'text',
+            text: `รวม ${params.billCount} บิล (${params.totalSpend.toLocaleString()} ฿)`,
+            size: 'lg',
+            color: THEME.velvetGrape,
+            margin: 'xs',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '16px',
+        contents: [
+          {
+            type: 'text',
+            text: 'จดบิลได้ครบทั้ง 4 แบบ (หารเท่า / หารเพิ่ม / หารแยก / กำหนดเอง) พร้อม VAT, SC, ส่วนลด และสร้าง QR พร้อมเพย์สำหรับโอนเงินได้ในหน้าเดียว',
+            size: 'xs',
+            color: THEME.velvetGrape,
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: THEME.primary,
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: 'เปิดเว็บจัดการบิล / จดบิล',
+              uri: liffUrl,
+            },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            color: THEME.lavenderHaze,
+            height: 'sm',
+            action: { type: 'message', label: 'ดูสรุปยอดโอนในแชท', text: '/สรุปยอด' },
+          },
+        ],
+      },
+    },
+  };
+}
 
 export function buildBillReceiptFlex(params: {
+  tripId?: number;
   billId: number;
   title: string;
   payerName: string;
@@ -22,6 +97,29 @@ export function buildBillReceiptFlex(params: {
   const tags: string[] = [];
   if (params.serviceChargePercent > 0) tags.push(`SC ${params.serviceChargePercent}%`);
   if (params.vatPercent > 0) tags.push(`VAT ${params.vatPercent}%`);
+
+  const footerButtons: messagingApi.FlexComponent[] = [
+    {
+      type: 'button',
+      style: 'secondary',
+      color: THEME.lavenderHaze,
+      height: 'sm',
+      action: { type: 'message', label: 'สรุปยอดทั้งทริป', text: '/สรุปยอด' },
+    },
+  ];
+  if (params.tripId) {
+    footerButtons.unshift({
+      type: 'button',
+      style: 'primary',
+      color: THEME.primary,
+      height: 'sm',
+      action: {
+        type: 'uri',
+        label: 'เปิดเว็บจัดการบิล / QR',
+        uri: buildLiffBillsUrl(params.tripId),
+      },
+    });
+  }
 
   return {
     type: 'flex',
@@ -68,28 +166,22 @@ export function buildBillReceiptFlex(params: {
       },
       footer: {
         type: 'box',
-        layout: 'horizontal',
+        layout: 'vertical',
         spacing: 'sm',
-        contents: [
-          {
-            type: 'button',
-            style: 'secondary',
-            color: THEME.lavenderHaze,
-            height: 'sm',
-            action: { type: 'message', label: 'สรุปยอดทั้งทริป', text: '/สรุปยอด' },
-          },
-        ],
+        contents: footerButtons,
       },
     },
   };
 }
 
 export function buildBillMenuFlex(params: {
+  tripId: number;
   tripName: string;
   tripStatus: string;
   bills: Array<{ id: number; title: string; totalAmount: number; splitMode: string }>;
 }): messagingApi.FlexMessage {
   const totalSpend = params.bills.reduce((s, b) => s + b.totalAmount, 0);
+  const liffUrl = buildLiffBillsUrl(params.tripId);
 
   const billRows: messagingApi.FlexComponent[] =
     params.bills.length === 0
@@ -141,10 +233,10 @@ export function buildBillMenuFlex(params: {
             margin: 'md',
             spacing: 'xs',
             contents: [
-              { type: 'text', text: 'วิธีเพิ่มบิลใหม่ (เลือกพิมพ์ตามแบบที่ต้องการ)', size: 'xxs', color: THEME.primary },
+              { type: 'text', text: 'แนะนำ: จดบิลและดู QR พร้อมเพย์ผ่านเว็บ LIFF', size: 'xxs', color: THEME.primary },
               {
                 type: 'text',
-                text: '/หารรวม ค่าข้าว 1000\n/หารเพิ่ม ค่าข้าว 1200 +เบียร์ 400 @เอ @บี\n/หารแยก ปิ้งย่าง (แล้วขึ้นบรรทัดใหม่ใส่รายการ)\n/หารเอง ค่าน้ำมัน @เอ=500 @บี=300',
+                text: 'กดปุ่มด้านล่างเพื่อเปิดเว็บจัดการบิล หรือพิมพ์ /หาร เพื่อเรียกปุ่มได้ทุกเมื่อ',
                 size: 'xxs',
                 color: THEME.velvetGrape,
                 wrap: true,
@@ -155,7 +247,7 @@ export function buildBillMenuFlex(params: {
       },
       footer: {
         type: 'box',
-        layout: 'horizontal',
+        layout: 'vertical',
         spacing: 'sm',
         contents: [
           {
@@ -163,14 +255,28 @@ export function buildBillMenuFlex(params: {
             style: 'primary',
             color: THEME.primary,
             height: 'sm',
-            action: { type: 'message', label: 'สรุปยอดโอน', text: '/สรุปยอด' },
+            action: { type: 'uri', label: 'เปิดเว็บจัดการบิล / QR พร้อมเพย์', uri: liffUrl },
           },
           {
-            type: 'button',
-            style: 'secondary',
-            color: THEME.lavenderHaze,
-            height: 'sm',
-            action: { type: 'message', label: 'ดูวิธีใช้ละเอียด', text: '/วิธีใช้' },
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'sm',
+            contents: [
+              {
+                type: 'button',
+                style: 'secondary',
+                color: THEME.lavenderHaze,
+                height: 'sm',
+                action: { type: 'message', label: 'สรุปยอดโอน', text: '/สรุปยอด' },
+              },
+              {
+                type: 'button',
+                style: 'secondary',
+                color: THEME.lavenderHaze,
+                height: 'sm',
+                action: { type: 'message', label: 'วิธีใช้', text: '/วิธีใช้' },
+              },
+            ],
           },
         ],
       },

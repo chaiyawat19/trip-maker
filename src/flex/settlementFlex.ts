@@ -1,5 +1,6 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
+import { buildLiffBillsUrl } from '../core/promptpay.js';
 
 export function buildSettlementFlex(params: {
   tripId: number;
@@ -102,11 +103,23 @@ export function buildSettlementFlex(params: {
       footer: {
         type: 'box',
         layout: 'vertical',
+        spacing: 'sm',
         contents: [
           {
             type: 'button',
+            style: 'primary',
+            color: THEME.primary,
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: 'เปิดเว็บดู QR พร้อมเพย์ / จัดการบิล',
+              uri: buildLiffBillsUrl(params.tripId),
+            },
+          },
+          {
+            type: 'button',
             style: allCleared ? 'primary' : 'secondary',
-            color: allCleared ? THEME.primary : THEME.lavenderHaze,
+            color: allCleared ? THEME.freeText : THEME.lavenderHaze,
             height: 'sm',
             action: {
               type: 'postback',

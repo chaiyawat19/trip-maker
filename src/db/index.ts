@@ -106,6 +106,12 @@ export function createDb(dbPath = process.env.DATABASE_URL || './data/promptpai.
       reminder_key TEXT NOT NULL,
       sent_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS user_payment_profiles (
+      line_user_id TEXT PRIMARY KEY,
+      promptpay_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   return { db: drizzle(sqlite, { schema }), sqlite };
