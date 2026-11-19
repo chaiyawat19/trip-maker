@@ -2,6 +2,7 @@ import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
 
 export function buildSettlementFlex(params: {
+  tripId: number;
   tripName: string;
   transfers: Array<{
     settlementId: number;
@@ -11,6 +12,9 @@ export function buildSettlementFlex(params: {
     status: string;
   }>;
 }): messagingApi.FlexMessage {
+  const confirmedCount = params.transfers.filter((t) => t.status === 'CONFIRMED').length;
+  const allCleared = params.transfers.length > 0 && confirmedCount === params.transfers.length;
+
   const rows: messagingApi.FlexComponent[] =
     params.transfers.length === 0
       ? [{ type: 'text', text: 'ไม่มียอดค้างโอนในทริปนี้', size: 'sm', color: THEME.textSecondary }]
@@ -18,7 +22,7 @@ export function buildSettlementFlex(params: {
           type: 'box',
           layout: 'horizontal',
           alignItems: 'center',
-          backgroundColor: THEME.lavenderTint,
+          backgroundColor: t.status === 'CONFIRMED' ? THEME.freeBg : THEME.lavenderTint,
           cornerRadius: '12px',
           paddingAll: '10px',
           contents: [
@@ -28,18 +32,33 @@ export function buildSettlementFlex(params: {
               flex: 1,
               contents: [
                 { type: 'text', text: `${t.fromName} ไป ${t.toName}`, size: 'xs', color: THEME.textSecondary },
-                { type: 'text', text: `${t.amount.toLocaleString()} ฿`, size: 'md', color: THEME.velvetGrape },
+                {
+                  type: 'text',
+                  text: `${t.amount.toLocaleString()} ฿`,
+                  size: 'md',
+                  color: t.status === 'CONFIRMED' ? THEME.freeText : THEME.velvetGrape,
+                },
               ],
             },
             {
               type: 'button',
               style: t.status === 'CONFIRMED' ? 'secondary' : 'primary',
-              color: t.status === 'CONFIRMED' ? THEME.freeBg : THEME.primary,
+              color:
+                t.status === 'CONFIRMED'
+                  ? THEME.freeBg
+                  : t.status === 'WAITING_CONFIRM'
+                    ? THEME.maybeText
+                    : THEME.primary,
               height: 'sm',
               flex: 0,
               action: {
                 type: 'postback',
-                label: t.status === 'CONFIRMED' ? 'เคลียร์' : t.status === 'WAITING_CONFIRM' ? 'ยืนยันรับ' : 'โอนแล้ว',
+                label:
+                  t.status === 'CONFIRMED'
+                    ? 'เคลียร์แล้ว'
+                    : t.status === 'WAITING_CONFIRM'
+                      ? 'ยืนยันรับ'
+                      : 'โอนแล้ว',
                 data: `action=toggle_settlement&settlementId=${t.settlementId}`,
               },
             },
@@ -55,11 +74,22 @@ export function buildSettlementFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
+        backgroundColor: allCleared ? THEME.freeBg : THEME.lavenderTint,
         paddingAll: '16px',
         contents: [
-          { type: 'text', text: `เคลียร์ยอด • ${params.tripName}`, size: 'xs', color: THEME.primary },
-          { type: 'text', text: `รายการโอนเงินสุทธิ (${params.transfers.length} รอบ)`, size: 'md', color: THEME.velvetGrape, margin: 'xs' },
+          {
+            type: 'text',
+            text: allCleared ? `เคลียร์ยอดครบ 100% • ${params.tripName}` : `เคลียร์ยอด • ${params.tripName}`,
+            size: 'xs',
+            color: allCleared ? THEME.freeText : THEME.primary,
+          },
+          {
+            type: 'text',
+            text: `รายการโอนเงินสุทธิ (${confirmedCount}/${params.transfers.length} เคลียร์แล้ว)`,
+            size: 'md',
+            color: THEME.velvetGrape,
+            margin: 'xs',
+          },
         ],
       },
       body: {
@@ -68,6 +98,23 @@ export function buildSettlementFlex(params: {
         spacing: 'sm',
         paddingAll: '16px',
         contents: rows,
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          {
+            type: 'button',
+            style: allCleared ? 'primary' : 'secondary',
+            color: allCleared ? THEME.primary : THEME.lavenderHaze,
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'ปิดทริปนี้',
+              data: `action=close_trip&tripId=${params.tripId}`,
+            },
+          },
+        ],
       },
     },
   };

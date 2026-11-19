@@ -20,10 +20,15 @@ import {
   settlements,
 } from './db/schema.js';
 import { parseCommand } from './core/commandParser.js';
-import { enumerateDates, rankDateWindows } from './core/dateMatcher.js';
+import { enumerateDates, rankDateWindows, type AvailabilityRecord } from './core/dateMatcher.js';
 import { calculateBill } from './core/billCalculator.js';
 import { calculateSettlements } from './core/settlementEngine.js';
-import { buildWelcomeFlex, buildTripCreatedFlex } from './flex/tripFlex.js';
+import {
+  buildWelcomeFlex,
+  buildTripCreatedFlex,
+  buildTripListFlex,
+  buildTripCompletedFlex,
+} from './flex/tripFlex.js';
 import { buildCalendarPollFlex } from './flex/calendarFlex.js';
 import { buildBillReceiptFlex } from './flex/billFlex.js';
 import { buildSettlementFlex } from './flex/settlementFlex.js';
@@ -40,13 +45,11 @@ const lineClient = new messagingApi.MessagingApiClient({
 
 const app = Fastify({ logger: true });
 
-// Serve static icon assets if present
 const publicDir = path.resolve('public');
 if (fs.existsSync(publicDir)) {
   await app.register(fastifyStatic, { root: publicDir, prefix: '/' });
 }
 
-// Preserve raw body for LINE signature verification
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
   try {
     (req as unknown as { rawBody: string }).rawBody = body as string;
@@ -57,7 +60,7 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, 
 });
 
 function verifyLineSignature(rawBody: string, signature: string | undefined): boolean {
-  if (!CHANNEL_SECRET) return true; // allow local test if secret not set
+  if (!CHANNEL_SECRET) return true;
   if (!signature) return false;
   const hash = crypto
     .createHmac('sha256', CHANNEL_SECRET)
@@ -152,6 +155,157 @@ function getActiveTrip(groupId: string) {
   return db.select().from(trips).where(eq(trips.id, grp.activeTripId)).get() ?? null;
 }
 
+function upsertAvailability(pollId: number, memberId: number, date: string, status: 'FREE' | 'MAYBE' | 'BUSY') {
+  const now = new Date().toISOString();
+  const existing = db
+    .select()
+    .from(availabilities)
+    .where(and(eq(availabilities.pollId, pollId), eq(availabilities.memberId, memberId), eq(availabilities.date, date)))
+    .get();
+  if (existing) {
+    db.update(availabilities).set({ status, updatedAt: now }).where(eq(availabilities.id, existing.id)).run();
+  } else {
+    db.insert(availabilities).values({ pollId, memberId, date, status, updatedAt: now }).run();
+  }
+}
+
+function buildPollFlexForId(pollId: number, activeMode: 'FREE' | 'MAYBE' | 'BUSY' = 'FREE') {
+  const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
+  if (!poll) return null;
+  const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+  if (!trip) return null;
+
+  const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+  const rows = db.select().from(availabilities).where(eq(availabilities.pollId, poll.id)).all();
+
+  const records: AvailabilityRecord[] = rows.map((r) => ({
+    memberId: r.memberId,
+    date: r.date,
+    status: r.status as 'FREE' | 'MAYBE' | 'BUSY',
+  }));
+
+  const respondedMemberIds = new Set(rows.map((r) => r.memberId));
+  const topWindows = rankDateWindows({
+    startDate: poll.startDate,
+    endDate: poll.endDate,
+    durationDays: poll.durationDays,
+    memberIds: members.map((m) => m.id),
+    records,
+  });
+
+  return buildCalendarPollFlex({
+    pollId: poll.id,
+    tripName: trip.name,
+    startDate: poll.startDate,
+    endDate: poll.endDate,
+    durationDays: poll.durationDays,
+    respondedCount: respondedMemberIds.size,
+    totalMembers: members.length,
+    activeMode,
+    records,
+    topWindows,
+  });
+}
+
+function syncAndBuildSettlementFlex(tripId: number, tripName: string) {
+  const now = new Date().toISOString();
+  const tripBills = db.select().from(bills).where(eq(bills.tripId, tripId)).all();
+  const allMembers = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+  const memberMap = new Map(allMembers.map((m) => [m.id, m.displayName]));
+
+  const summaries = tripBills.map((b) => {
+    const items = db.select().from(billItems).where(eq(billItems.billId, b.id)).all();
+    const calcItems = items.map((it) => {
+      const shares = db.select().from(billItemShares).where(eq(billItemShares.billItemId, it.id)).all();
+      return {
+        name: it.name,
+        amount: it.amount,
+        isAddon: it.isAddon,
+        participantIds: shares.map((s) => s.memberId),
+      };
+    });
+    const calc = calculateBill({
+      items: calcItems,
+      vatPercent: b.vatPercent,
+      serviceChargePercent: b.serviceChargePercent,
+      discountAmount: b.discountAmount,
+    });
+    return {
+      payerMemberId: b.payerMemberId,
+      totalAmount: b.totalAmount,
+      shares: calc.shares.map((s) => ({ memberId: s.memberId, netTotal: s.netTotal })),
+    };
+  });
+
+  const res = calculateSettlements(summaries);
+  const existingRows = db.select().from(settlements).where(eq(settlements.tripId, tripId)).all();
+
+  // Check if computed transfers match existing rows (preserve PENDING/WAITING_CONFIRM/CONFIRMED)
+  const key = (fromId: number, toId: number, amt: number) => `${fromId}->${toId}:${amt}`;
+  const existingMap = new Map(existingRows.map((r) => [key(r.fromMemberId, r.toMemberId, r.amount), r]));
+  const computedKeys = new Set(res.transfers.map((t) => key(t.fromMemberId, t.toMemberId, t.amount)));
+
+  const isSameSet =
+    existingRows.length === res.transfers.length &&
+    res.transfers.every((t) => existingMap.has(key(t.fromMemberId, t.toMemberId, t.amount)));
+
+  let finalRows = existingRows;
+  if (!isSameSet) {
+    db.delete(settlements).where(eq(settlements.tripId, tripId)).run();
+    finalRows = res.transfers.map((t) => {
+      const prev = existingMap.get(key(t.fromMemberId, t.toMemberId, t.amount));
+      return db
+        .insert(settlements)
+        .values({
+          tripId,
+          fromMemberId: t.fromMemberId,
+          toMemberId: t.toMemberId,
+          amount: t.amount,
+          status: prev && computedKeys.has(key(t.fromMemberId, t.toMemberId, t.amount)) ? prev.status : 'PENDING',
+          updatedAt: now,
+        })
+        .returning()
+        .get();
+    });
+  }
+
+  return buildSettlementFlex({
+    tripId,
+    tripName,
+    transfers: finalRows.map((s) => ({
+      settlementId: s.id,
+      fromName: memberMap.get(s.fromMemberId) || 'เพื่อน',
+      toName: memberMap.get(s.toMemberId) || 'เพื่อน',
+      amount: s.amount,
+      status: s.status,
+    })),
+  });
+}
+
+function closeTripAndBuildFlex(groupId: string, tripId: number) {
+  const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+  if (!trip) return null;
+
+  db.update(trips).set({ status: 'COMPLETED' }).where(eq(trips.id, tripId)).run();
+  const grp = db.select().from(groups).where(eq(groups.groupId, groupId)).get();
+  if (grp?.activeTripId === tripId) {
+    db.update(groups).set({ activeTripId: null }).where(eq(groups.groupId, groupId)).run();
+  }
+
+  const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+  const tripBills = db.select().from(bills).where(eq(bills.tripId, tripId)).all();
+  const totalSpend = tripBills.reduce((s, b) => s + b.totalAmount, 0);
+
+  return buildTripCompletedFlex({
+    tripName: trip.name,
+    lockedStartDate: trip.lockedStartDate,
+    lockedEndDate: trip.lockedEndDate,
+    memberCount: members.length,
+    billCount: tripBills.length,
+    totalSpend,
+  });
+}
+
 async function handleTextMessage(
   event: Extract<WebhookEvent, { type: 'message' }>,
   groupId: string,
@@ -164,9 +318,37 @@ async function handleTextMessage(
   const now = new Date().toISOString();
 
   if (parsed.type === 'HELP') {
+    await lineClient.replyMessage({ replyToken: event.replyToken, messages: [buildHelpFlex()] });
+    return;
+  }
+
+  if (parsed.type === 'LIST_TRIPS') {
+    const allTrips = db.select().from(trips).where(eq(trips.groupId, groupId)).orderBy(desc(trips.id)).all();
+    if (allTrips.length === 0) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'กลุ่มนี้ยังไม่มีทริปเลย พิมพ์ /สร้างทริป <ชื่อทริป> เพื่อเริ่มต้นครับ' }],
+      });
+      return;
+    }
+    const grp = db.select().from(groups).where(eq(groups.groupId, groupId)).get();
+    const enriched = allTrips.map((t) => {
+      const m = db.select().from(tripMembers).where(eq(tripMembers.tripId, t.id)).all();
+      const b = db.select().from(bills).where(eq(bills.tripId, t.id)).all();
+      return {
+        id: t.id,
+        name: t.name,
+        status: t.status,
+        lockedStartDate: t.lockedStartDate,
+        lockedEndDate: t.lockedEndDate,
+        memberCount: m.length,
+        billCount: b.length,
+        totalSpend: b.reduce((s, x) => s + x.totalAmount, 0),
+      };
+    });
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [buildHelpFlex()],
+      messages: [buildTripListFlex({ activeTripId: grp?.activeTripId ?? null, trips: enriched })],
     });
     return;
   }
@@ -199,7 +381,14 @@ async function handleTextMessage(
     const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [buildTripCreatedFlex({ tripId: trip.id, tripName: trip.name, members })],
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          members,
+        }),
+      ],
     });
     return;
   }
@@ -208,16 +397,90 @@ async function handleTextMessage(
   if (!trip) {
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: 'ยังไม่มีทริปที่ใช้งานอยู่ พิมพ์ /สร้างทริป <ชื่อทริป> เพื่อเริ่มต้นครับ' }],
+      messages: [{ type: 'text', text: 'ยังไม่มีทริปที่ใช้งานอยู่ พิมพ์ /สร้างทริป <ชื่อทริป> หรือ /ทริป เพื่อเลือกทริปครับ' }],
     });
     return;
   }
 
-  if (parsed.type === 'JOIN_TRIP' && userId) {
-    const member = await ensureMemberInTrip(trip.id, groupId, userId);
+  if (parsed.type === 'RENAME_TRIP') {
+    db.update(trips).set({ name: parsed.name }).where(eq(trips.id, trip.id)).run();
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${member.displayName} เข้าร่วมทริป "${trip.name}" เรียบร้อย` }],
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: parsed.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'START_TRIP') {
+    db.update(trips).set({ status: 'LOCKED' }).where(eq(trips.id, trip.id)).run();
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: 'LOCKED',
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'CLOSE_TRIP') {
+    const flex = closeTripAndBuildFlex(groupId, trip.id);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
+
+  if (parsed.type === 'JOIN_TRIP' && userId) {
+    await ensureMemberInTrip(trip.id, groupId, userId);
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'LIST_MEMBERS') {
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
     });
     return;
   }
@@ -232,9 +495,19 @@ async function handleTextMessage(
         createdAt: now,
       })
       .run();
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `เพิ่ม Guest "${parsed.name}" เข้าทริป "${trip.name}" แล้ว` }],
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
     });
     return;
   }
@@ -252,29 +525,59 @@ async function handleTextMessage(
       .returning()
       .get();
 
-    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
-    const topWindows = rankDateWindows({
-      startDate: poll.startDate,
-      endDate: poll.endDate,
-      durationDays: poll.durationDays,
-      memberIds: members.map((m) => m.id),
-      records: [],
-    });
+    const flex = buildPollFlexForId(poll.id, 'FREE');
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
 
+  if (parsed.type === 'VIEW_AVAILABILITY') {
+    const poll = db
+      .select()
+      .from(datePolls)
+      .where(eq(datePolls.tripId, trip.id))
+      .orderBy(desc(datePolls.id))
+      .get();
+    if (!poll) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'ยังไม่มีโพลวันว่าง พิมพ์ /นัด 1-15 ธ.ค. 3วัน ก่อนครับ' }],
+      });
+      return;
+    }
+    const flex = buildPollFlexForId(poll.id, 'FREE');
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
+
+  if (parsed.type === 'REMIND_FRIENDS') {
+    const poll = db
+      .select()
+      .from(datePolls)
+      .where(eq(datePolls.tripId, trip.id))
+      .orderBy(desc(datePolls.id))
+      .get();
+    if (!poll) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'ยังไม่มีโพลวันว่างในทริปนี้ครับ' }],
+      });
+      return;
+    }
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+    const rows = db.select().from(availabilities).where(eq(availabilities.pollId, poll.id)).all();
+    const respondedIds = new Set(rows.map((r) => r.memberId));
+    const pending = members.filter((m) => !respondedIds.has(m.id));
+    const msg =
+      pending.length === 0
+        ? 'ทุกคนตอบวันว่างครบแล้วครับ!'
+        : `ยังรอคำตอบวันว่างจาก: ${pending.map((m) => m.displayName).join(', ')}`;
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [
-        buildCalendarPollFlex({
-          pollId: poll.id,
-          tripName: trip.name,
-          startDate: poll.startDate,
-          endDate: poll.endDate,
-          durationDays: poll.durationDays,
-          respondedCount: 0,
-          totalMembers: members.length,
-          topWindows,
-        }),
-      ],
+      messages: [{ type: 'text', text: msg }],
     });
     return;
   }
@@ -297,19 +600,37 @@ async function handleTextMessage(
     }
 
     for (const d of parsed.dates) {
-      db.insert(availabilities)
-        .values({ pollId: poll.id, memberId: member.id, date: d, status: parsed.status, updatedAt: now })
-        .run();
+      upsertAvailability(poll.id, member.id, d, parsed.status);
     }
 
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `บันทึกสถานะวันของ ${member.displayName} (${parsed.dates.length} วัน) เรียบร้อย` }],
-    });
+    const flex = buildPollFlexForId(poll.id, parsed.status);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
     return;
   }
 
   if (parsed.type === 'QUICK_SPLIT' && userId) {
+    if (trip.status === 'PLANNING') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          {
+            type: 'text',
+            text: `ทริป "${trip.name}" ยังไม่ได้ล็อกวัน/เริ่มทริปเลยครับ กรุณาล็อกวันจากการหาวันว่าง หรือพิมพ์ /เริ่มทริป ก่อนจดบิลครับ`,
+          },
+        ],
+      });
+      return;
+    }
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ปิดทริปไปแล้วครับ พิมพ์ /สร้างทริป เพื่อเริ่มทริปใหม่ได้เลย` }],
+      });
+      return;
+    }
+
     const payer = await ensureMemberInTrip(trip.id, groupId, userId);
     const allMembers = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     const resolveNames = (names: string[]) =>
@@ -387,65 +708,34 @@ async function handleTextMessage(
     return;
   }
 
-  if (parsed.type === 'SETTLE_SUMMARY') {
+  if (parsed.type === 'LIST_BILLS') {
     const tripBills = db.select().from(bills).where(eq(bills.tripId, trip.id)).all();
-    const allMembers = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
-    const memberMap = new Map(allMembers.map((m) => [m.id, m.displayName]));
-
-    const summaries = tripBills.map((b) => {
-      const items = db.select().from(billItems).where(eq(billItems.billId, b.id)).all();
-      const calcItems = items.map((it) => {
-        const shares = db.select().from(billItemShares).where(eq(billItemShares.billItemId, it.id)).all();
-        return {
-          name: it.name,
-          amount: it.amount,
-          isAddon: it.isAddon,
-          participantIds: shares.map((s) => s.memberId),
-        };
+    if (tripBills.length === 0) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" ยังไม่มีบิลค่าใช้จ่ายครับ` }],
       });
-      const calc = calculateBill({
-        items: calcItems,
-        vatPercent: b.vatPercent,
-        serviceChargePercent: b.serviceChargePercent,
-        discountAmount: b.discountAmount,
-      });
-      return {
-        payerMemberId: b.payerMemberId,
-        totalAmount: b.totalAmount,
-        shares: calc.shares.map((s) => ({ memberId: s.memberId, netTotal: s.netTotal })),
-      };
-    });
-
-    const res = calculateSettlements(summaries);
-    const createdSettlements = res.transfers.map((t) =>
-      db
-        .insert(settlements)
-        .values({
-          tripId: trip.id,
-          fromMemberId: t.fromMemberId,
-          toMemberId: t.toMemberId,
-          amount: t.amount,
-          status: 'PENDING',
-          updatedAt: now,
-        })
-        .returning()
-        .get(),
-    );
-
+      return;
+    }
+    const total = tripBills.reduce((s, b) => s + b.totalAmount, 0);
+    const lines = tripBills.map((b, idx) => `${idx + 1}. ${b.title} — ${b.totalAmount.toLocaleString()} ฿`);
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [
-        buildSettlementFlex({
-          tripName: trip.name,
-          transfers: createdSettlements.map((s) => ({
-            settlementId: s.id,
-            fromName: memberMap.get(s.fromMemberId) || 'เพื่อน',
-            toName: memberMap.get(s.toMemberId) || 'เพื่อน',
-            amount: s.amount,
-            status: s.status,
-          })),
-        }),
+        {
+          type: 'text',
+          text: `บิลทั้งหมดของ "${trip.name}" (${tripBills.length} บิล | รวม ${total.toLocaleString()} ฿):\n${lines.join('\n')}`,
+        },
       ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'SETTLE_SUMMARY') {
+    const flex = syncAndBuildSettlementFlex(trip.id, trip.name);
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [flex],
     });
   }
 }
@@ -457,15 +747,106 @@ async function handlePostback(
   const params = new URLSearchParams(event.postback.data);
   const action = params.get('action');
   const userId = event.source.userId;
-  const now = new Date().toISOString();
 
   if (action === 'join_trip' && userId) {
     const tripId = Number(params.get('tripId'));
-    const member = await ensureMemberInTrip(tripId, groupId, userId);
+    await ensureMemberInTrip(tripId, groupId, userId);
+    const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+    if (!trip) return;
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${member.displayName} เข้าร่วมทริปเรียบร้อย!` }],
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
     });
+    return;
+  }
+
+  if (action === 'start_trip_now') {
+    const tripId = Number(params.get('tripId'));
+    db.update(trips).set({ status: 'LOCKED' }).where(eq(trips.id, tripId)).run();
+    const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+    if (!trip) return;
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (action === 'switch_trip') {
+    const tripId = Number(params.get('tripId'));
+    db.update(groups).set({ activeTripId: tripId }).where(eq(groups.groupId, groupId)).run();
+    const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+    if (!trip) return;
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: trip.status,
+          lockedStartDate: trip.lockedStartDate,
+          lockedEndDate: trip.lockedEndDate,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (action === 'close_trip') {
+    const tripId = Number(params.get('tripId'));
+    const flex = closeTripAndBuildFlex(groupId, tripId);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
+
+  if (action === 'cal_mode') {
+    const pollId = Number(params.get('pollId'));
+    const mode = (params.get('mode') || 'FREE') as 'FREE' | 'MAYBE' | 'BUSY';
+    const flex = buildPollFlexForId(pollId, mode);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
+
+  if (action === 'toggle_day' && userId) {
+    const pollId = Number(params.get('pollId'));
+    const date = params.get('date');
+    const mode = (params.get('mode') || 'FREE') as 'FREE' | 'MAYBE' | 'BUSY';
+    const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
+    if (!poll || !date) return;
+
+    const member = await ensureMemberInTrip(poll.tripId, groupId, userId);
+    upsertAvailability(poll.id, member.id, date, mode);
+
+    const flex = buildPollFlexForId(poll.id, mode);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
     return;
   }
 
@@ -475,14 +856,12 @@ async function handlePostback(
     if (!poll) return;
     const member = await ensureMemberInTrip(poll.tripId, groupId, userId);
     for (const d of enumerateDates(poll.startDate, poll.endDate)) {
-      db.insert(availabilities)
-        .values({ pollId: poll.id, memberId: member.id, date: d, status: 'FREE', updatedAt: now })
-        .run();
+      upsertAvailability(poll.id, member.id, d, 'FREE');
     }
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `${member.displayName} ลงว่าว่างทุกวัน (${poll.startDate} ถึง ${poll.endDate}) แล้ว` }],
-    });
+    const flex = buildPollFlexForId(poll.id, 'FREE');
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
     return;
   }
 
@@ -498,10 +877,23 @@ async function handlePostback(
       .where(eq(trips.id, poll.tripId))
       .run();
 
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `ล็อกวันเดินทางเรียบร้อย: ${start} ถึง ${end}` }],
-    });
+    const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, poll.tripId)).all();
+    if (trip) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [
+          buildTripCreatedFlex({
+            tripId: trip.id,
+            tripName: trip.name,
+            status: trip.status,
+            lockedStartDate: trip.lockedStartDate,
+            lockedEndDate: trip.lockedEndDate,
+            members,
+          }),
+        ],
+      });
+    }
     return;
   }
 
@@ -517,14 +909,15 @@ async function handlePostback(
           : 'PENDING';
 
     db.update(settlements)
-      .set({ status: nextStatus, updatedAt: now })
+      .set({ status: nextStatus, updatedAt: new Date().toISOString() })
       .where(eq(settlements.id, settlementId))
       .run();
 
-    await lineClient.replyMessage({
-      replyToken: event.replyToken,
-      messages: [{ type: 'text', text: `อัปเดตสถานะการโอน #${settlementId} เป็น ${nextStatus}` }],
-    });
+    const trip = db.select().from(trips).where(eq(trips.id, row.tripId)).get();
+    if (trip) {
+      const flex = syncAndBuildSettlementFlex(trip.id, trip.name);
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
   }
 }
 

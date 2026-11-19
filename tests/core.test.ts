@@ -29,6 +29,13 @@ describe('commandParser', () => {
     });
   });
 
+  it('parses /เปลี่ยนชื่อทริป, /เริ่มทริป, /ปิดทริป, and /สรุปยอด', () => {
+    expect(parseCommand('/เปลี่ยนชื่อทริป เกาะล้าน')).toEqual({ type: 'RENAME_TRIP', name: 'เกาะล้าน' });
+    expect(parseCommand('/เริ่มทริป')).toEqual({ type: 'START_TRIP' });
+    expect(parseCommand('/ปิดทริป')).toEqual({ type: 'CLOSE_TRIP' });
+    expect(parseCommand('/สรุปยอด')).toEqual({ type: 'SETTLE_SUMMARY' });
+  });
+
   it('parses /หาร with base + beer add-on + vat7', () => {
     expect(parseCommand('/หาร ค่าข้าว 1200 +เบียร์ 400(@เอ @บี) +vat7')).toEqual({
       type: 'QUICK_SPLIT',

@@ -1,5 +1,7 @@
 export type ParsedCommand =
   | { type: 'CREATE_TRIP'; name: string }
+  | { type: 'RENAME_TRIP'; name: string }
+  | { type: 'START_TRIP' }
   | { type: 'LIST_TRIPS' }
   | { type: 'JOIN_TRIP' }
   | { type: 'ADD_GUEST'; name: string }
@@ -85,6 +87,11 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
   switch (cmd) {
     case '/สร้างทริป':
       return rest ? { type: 'CREATE_TRIP', name: rest } : { type: 'HELP' };
+    case '/เปลี่ยนชื่อทริป':
+    case '/ตั้งชื่อทริป':
+      return rest ? { type: 'RENAME_TRIP', name: rest } : { type: 'HELP' };
+    case '/เริ่มทริป':
+      return { type: 'START_TRIP' };
     case '/ทริป':
       return { type: 'LIST_TRIPS' };
     case '/เข้าทริป':
@@ -102,6 +109,7 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
     case '/บิลทั้งหมด':
       return { type: 'LIST_BILLS' };
     case '/สรุปเงิน':
+    case '/สรุปยอด':
     case '/เคลียร์ยอด':
       return { type: 'SETTLE_SUMMARY' };
     case '/วิธีใช้':
