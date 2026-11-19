@@ -18,11 +18,13 @@ import {
   billItems,
   billItemShares,
   settlements,
+  tripReminders,
 } from './db/schema.js';
 import { parseCommand } from './core/commandParser.js';
 import { enumerateDates, rankDateWindows, type AvailabilityRecord } from './core/dateMatcher.js';
 import { calculateBill } from './core/billCalculator.js';
 import { calculateSettlements } from './core/settlementEngine.js';
+import { getBangkokDateIso, getDueReminderKey, buildReminderText } from './core/reminderEngine.js';
 import {
   buildWelcomeFlex,
   buildTripCreatedFlex,
@@ -1095,6 +1097,47 @@ async function handlePostback(
     }
   }
 }
+
+async function runDueTripReminders() {
+  const todayIso = getBangkokDateIso();
+  const lockedTrips = db.select().from(trips).where(eq(trips.status, 'LOCKED')).all();
+  let sentCount = 0;
+
+  for (const trip of lockedTrips) {
+    if (!trip.lockedStartDate || !trip.groupId) continue;
+    const key = getDueReminderKey(trip.lockedStartDate, todayIso);
+    if (!key) continue;
+
+    const alreadySent = db
+      .select()
+      .from(tripReminders)
+      .where(and(eq(tripReminders.tripId, trip.id), eq(tripReminders.reminderKey, key)))
+      .get();
+    if (alreadySent) continue;
+
+    const text = buildReminderText(trip.name, trip.lockedStartDate, trip.lockedEndDate, key);
+    try {
+      await lineClient.pushMessage({ to: trip.groupId, messages: [{ type: 'text', text }] });
+      db.insert(tripReminders)
+        .values({ tripId: trip.id, reminderKey: key, sentAt: new Date().toISOString() })
+        .run();
+      sentCount++;
+    } catch (err) {
+      app.log.error(err, `Failed to send ${key} reminder for trip ${trip.id}`);
+    }
+  }
+
+  return { todayIso, sentCount };
+}
+
+app.get('/cron/reminders', async () => {
+  return runDueTripReminders();
+});
+
+// Check every 1 hour while server is awake
+setInterval(() => {
+  runDueTripReminders().catch((err) => app.log.error(err, 'Reminder interval error'));
+}, 60 * 60 * 1000);
 
 app.listen({ port: PORT, host: '0.0.0.0' }).catch((err) => {
   app.log.error(err);

@@ -99,6 +99,13 @@ export function createDb(dbPath = process.env.DATABASE_URL || './data/promptpai.
       status TEXT NOT NULL DEFAULT 'PENDING',
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS trip_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trip_id INTEGER NOT NULL,
+      reminder_key TEXT NOT NULL,
+      sent_at TEXT NOT NULL
+    );
   `);
 
   return { db: drizzle(sqlite, { schema }), sqlite };

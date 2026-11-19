@@ -83,3 +83,10 @@ export const settlements = sqliteTable('settlements', {
   status: text('status').notNull().default('PENDING'), // PENDING | WAITING_CONFIRM | CONFIRMED
   updatedAt: text('updated_at').notNull(),
 });
+
+export const tripReminders = sqliteTable('trip_reminders', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  tripId: integer('trip_id').notNull(),
+  reminderKey: text('reminder_key').notNull(), // D-3 | D-1 | D-0
+  sentAt: text('sent_at').notNull(),
+});

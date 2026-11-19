@@ -3,6 +3,7 @@ import { parseCommand } from '../src/core/commandParser.js';
 import { calculateBill } from '../src/core/billCalculator.js';
 import { rankDateWindows } from '../src/core/dateMatcher.js';
 import { calculateSettlements } from '../src/core/settlementEngine.js';
+import { getDueReminderKey, buildReminderText } from '../src/core/reminderEngine.js';
 
 describe('commandParser', () => {
   it('parses /สร้างทริป', () => {
@@ -200,5 +201,18 @@ describe('settlementEngine', () => {
       { fromMemberId: 3, toMemberId: 1, amount: 300 },
       { fromMemberId: 2, toMemberId: 1, amount: 200 },
     ]);
+  });
+});
+
+describe('reminderEngine', () => {
+  it('detects D-3, D-1, and D-0 reminders and formats Thai date range', () => {
+    expect(getDueReminderKey('2026-12-12', '2026-12-09')).toBe('D-3');
+    expect(getDueReminderKey('2026-12-12', '2026-12-11')).toBe('D-1');
+    expect(getDueReminderKey('2026-12-12', '2026-12-12')).toBe('D-0');
+    expect(getDueReminderKey('2026-12-12', '2026-12-10')).toBeNull();
+
+    const msg = buildReminderText('เชียงใหม่', '2026-12-12', '2026-12-14', 'D-3');
+    expect(msg).toContain('12-14 ธ.ค.');
+    expect(msg).toContain('3 วัน');
   });
 });
