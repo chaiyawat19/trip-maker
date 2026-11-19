@@ -200,7 +200,7 @@ function buildPollFlexForId(pollId: number, activeMode: 'FREE' | 'MAYBE' | 'BUSY
     endDate: poll.endDate,
     durationDays: poll.durationDays,
     respondedCount: respondedMemberIds.size,
-    totalMembers: members.length,
+    members: members.map((m) => ({ id: m.id, displayName: m.displayName })),
     activeMode,
     records,
     topWindows,
