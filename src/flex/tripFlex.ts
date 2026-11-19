@@ -217,31 +217,33 @@ export function buildTripCreatedFlex(params: {
         uri: pickWebUrl,
       },
     },
-    {
-      type: 'button',
-      style: 'secondary',
-      color: THEME.lavenderHaze,
-      height: 'sm',
-      action: {
-        type: 'postback',
-        label: 'เข้าร่วมทริป',
-        data: `action=join_trip&tripId=${params.tripId}`,
-      },
-    },
   ];
 
   if (params.status === 'PLANNING') {
-    footerButtons.push({
-      type: 'button',
-      style: 'secondary',
-      color: THEME.lavenderTint,
-      height: 'sm',
-      action: {
-        type: 'postback',
-        label: 'เริ่มทริปเลย',
-        data: `action=start_trip_now&tripId=${params.tripId}`,
+    footerButtons.push(
+      {
+        type: 'button',
+        style: 'secondary',
+        color: THEME.lavenderHaze,
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: 'เข้าร่วมทริป',
+          data: `action=join_trip&tripId=${params.tripId}`,
+        },
       },
-    });
+      {
+        type: 'button',
+        style: 'secondary',
+        color: THEME.lavenderTint,
+        height: 'sm',
+        action: {
+          type: 'postback',
+          label: 'เริ่มทริปเลย',
+          data: `action=start_trip_now&tripId=${params.tripId}`,
+        },
+      },
+    );
   }
 
   return {
