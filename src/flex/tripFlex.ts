@@ -185,7 +185,7 @@ export function buildTripCreatedFlex(params: {
       ? formatThaiRange(params.lockedStartDate, params.lockedEndDate)
       : params.status === 'LOCKED'
         ? 'ยังไม่ได้กำหนด (พิมพ์ /ตั้งวัน 19-21 พ.ย.)'
-        : 'รอนัดวันว่าง (พิมพ์ /นัด 1-15 ธ.ค. 3วัน)';
+        : 'รอนัดวันว่าง (พิมพ์ /นัด 19-21 พ.ย. 3วัน)';
 
   const nextStepsText =
     params.status === 'LOCKED'
@@ -197,7 +197,7 @@ export function buildTripCreatedFlex(params: {
           '• /ปิดทริป — ปิดทริปเมื่อเคลียร์ยอดครบแล้ว',
         ].join('\n')
       : [
-          '• /นัด 1-15 ธ.ค. 3วัน — สร้างปฏิทินหาวันว่างในเว็บ',
+          '• /นัด 19-21 พ.ย. 3วัน — สร้างปฏิทินหาวันว่างในเว็บ',
           '• /เริ่มทริป 19-21 พ.ย. — ข้ามการโหวตและเริ่มทริปทันที',
           '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
           '• /เปลี่ยนชื่อทริป <ชื่อใหม่> — แก้ไขชื่อทริป',
@@ -333,7 +333,7 @@ export function buildTripCreatedFlex(params: {
             paddingAll: '12px',
             spacing: 'xs',
             contents: [
-              { type: 'text', text: 'ทำอะไรต่อได้บ้าง', size: 'xxs', color: THEME.primary },
+              { type: 'text', text: 'นัดวันกับเพื่อนเลย', size: 'xxs', color: THEME.primary },
               {
                 type: 'text',
                 text: nextStepsText,
