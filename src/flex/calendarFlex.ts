@@ -1,6 +1,6 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
-import { enumerateDates, type AvailabilityRecord, type WindowMatch } from '../core/dateMatcher.js';
+import { enumerateDates, formatThaiRange, type AvailabilityRecord, type WindowMatch } from '../core/dateMatcher.js';
 
 function compressDayNumbers(days: number[]): string {
   if (days.length === 0) return '-';
@@ -190,18 +190,19 @@ export function buildCalendarPollFlex(params: {
 
   const memberNameMap = new Map(params.members.map((m) => [m.id, m.displayName]));
   const best = params.topWindows[0];
-  let bestLabel = `${params.startDate} ถึง ${params.endDate}`;
+  const pollRangeText = formatThaiRange(params.startDate, params.endDate, params.durationDays);
+  let bestLabel = pollRangeText;
   if (best) {
     const missingNames = [...best.busyMemberIds, ...best.pendingMemberIds]
       .map((id) => memberNameMap.get(id))
       .filter(Boolean);
-    const suffix = missingNames.length > 0 ? ` • ยังไม่ครบ: ${missingNames.join(', ')}` : ' • ครบทุกคน';
-    bestLabel = `แนะนำ: ${best.startDate} ถึง ${best.endDate} (${best.freeMemberIds.length}/${totalMembers}${suffix})`;
+    const suffix = missingNames.length > 0 ? ` • รอ: ${missingNames.join(', ')}` : ' • ครบทุกคน';
+    bestLabel = `แนะนำ: ${formatThaiRange(best.startDate, best.endDate, params.durationDays)} (${best.freeMemberIds.length}/${totalMembers}${suffix})`;
   }
 
   return {
     type: 'flex',
-    altText: `นัดวันว่าง: ${params.tripName} (${params.startDate} - ${params.endDate})`,
+    altText: `นัดวันว่าง: ${params.tripName} (${pollRangeText})`,
     contents: {
       type: 'bubble',
       size: 'mega',
@@ -213,7 +214,7 @@ export function buildCalendarPollFlex(params: {
         contents: [
           {
             type: 'text',
-            text: `${params.tripName} • ${params.durationDays} วันติดกัน`,
+            text: `${params.tripName} • ${pollRangeText}`,
             size: 'xs',
             color: THEME.primary,
           },
@@ -302,7 +303,7 @@ export function buildCalendarPollFlex(params: {
                   height: 'sm' as const,
                   action: {
                     type: 'postback' as const,
-                    label: `ล็อกวันเริ่มทริป ${best.startDate}`,
+                    label: `ล็อกวัน ${formatThaiRange(best.startDate, best.endDate)}`,
                     data: `action=lock_date&pollId=${params.pollId}&start=${best.startDate}&end=${best.endDate}`,
                   },
                 },

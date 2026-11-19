@@ -1,12 +1,13 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
+import { formatThaiRange } from '../core/dateMatcher.js';
 
 type FlexMessage = messagingApi.FlexMessage;
 
 function statusLabel(status: string, start?: string | null, end?: string | null): string {
   if (status === 'COMPLETED') return 'ปิดทริปแล้ว';
   if (status === 'LOCKED') {
-    return start && end ? `เริ่มทริปแล้ว (${start} ถึง ${end})` : 'เริ่มทริปแล้ว';
+    return start && end ? `เริ่มทริปแล้ว (${formatThaiRange(start, end)})` : 'เริ่มทริปแล้ว';
   }
   return 'กำลังวางแผน (ยังไม่เริ่มทริป)';
 }
@@ -302,7 +303,7 @@ export function buildTripCompletedFlex(params: {
 }): FlexMessage {
   const dateText =
     params.lockedStartDate && params.lockedEndDate
-      ? `${params.lockedStartDate} ถึง ${params.lockedEndDate}`
+      ? formatThaiRange(params.lockedStartDate, params.lockedEndDate)
       : 'ไม่ได้ระบุช่วงวัน';
 
   return {

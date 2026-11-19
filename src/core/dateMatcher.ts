@@ -17,6 +17,29 @@ export interface WindowMatch {
   score: number;
 }
 
+const THAI_SHORT_MONTHS = [
+  '', 'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+];
+
+export function formatThaiDate(iso: string): string {
+  const [, m, d] = iso.split('-');
+  return `${Number(d)} ${THAI_SHORT_MONTHS[Number(m)] || m}`;
+}
+
+export function formatThaiRange(startDate: string, endDate: string, durationDays?: number): string {
+  const [, m1, d1] = startDate.split('-');
+  const [, m2, d2] = endDate.split('-');
+  const prefix = durationDays ? `${durationDays} วัน ` : '';
+  if (startDate === endDate) {
+    return `${prefix}${Number(d1)} ${THAI_SHORT_MONTHS[Number(m1)] || m1}`;
+  }
+  if (m1 === m2) {
+    return `${prefix}${Number(d1)}-${Number(d2)} ${THAI_SHORT_MONTHS[Number(m1)] || m1}`;
+  }
+  return `${prefix}${Number(d1)} ${THAI_SHORT_MONTHS[Number(m1)] || m1}-${Number(d2)} ${THAI_SHORT_MONTHS[Number(m2)] || m2}`;
+}
+
 export function enumerateDates(startDate: string, endDate: string): string[] {
   const dates: string[] = [];
   const cur = new Date(`${startDate}T00:00:00Z`);

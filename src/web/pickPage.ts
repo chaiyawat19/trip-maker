@@ -1,3 +1,5 @@
+import { formatThaiRange } from '../core/dateMatcher.js';
+
 export function renderPickPage(params: {
   pollId: number;
   tripName: string;
@@ -8,6 +10,7 @@ export function renderPickPage(params: {
   records: Array<{ memberId: number; date: string; status: 'FREE' | 'MAYBE' | 'BUSY' }>;
 }): string {
   const dataJson = JSON.stringify(params);
+  const shortRange = formatThaiRange(params.startDate, params.endDate, params.durationDays);
 
   return `<!DOCTYPE html>
 <html lang="th">
@@ -48,9 +51,9 @@ export function renderPickPage(params: {
 <body>
   <div class="card">
     <div class="header">
-      <span class="badge">${params.tripName} • ${params.durationDays} วันติดกัน</span>
+      <span class="badge">${params.tripName} • ${shortRange}</span>
       <h1>เลือกวันว่างของคุณ</h1>
-      <div class="sub">${params.startDate} ถึง ${params.endDate} (กดเลือกครบแล้วค่อยกดตกลงทีเดียว)</div>
+      <div class="sub">กดเลือกครบทุกวันแล้วค่อยกดตกลงทีเดียว</div>
     </div>
     <div class="body">
       <div>
