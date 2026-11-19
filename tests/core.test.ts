@@ -29,10 +29,12 @@ describe('commandParser', () => {
     });
   });
 
-  it('parses /เปลี่ยนชื่อทริป, /เริ่มทริป, /ปิดทริป, and /สรุปยอด', () => {
+  it('parses /เปลี่ยนชื่อทริป, /เริ่มทริป, /ปิดทริป, /สมาชิก, and /สรุปยอด', () => {
     expect(parseCommand('/เปลี่ยนชื่อทริป เกาะล้าน')).toEqual({ type: 'RENAME_TRIP', name: 'เกาะล้าน' });
     expect(parseCommand('/เริ่มทริป')).toEqual({ type: 'START_TRIP' });
     expect(parseCommand('/ปิดทริป')).toEqual({ type: 'CLOSE_TRIP' });
+    expect(parseCommand('/สมาชิก')).toEqual({ type: 'LIST_MEMBERS' });
+    expect(parseCommand('@PromptPai /สมาชิก')).toEqual({ type: 'LIST_MEMBERS' });
     expect(parseCommand('/สรุปยอด')).toEqual({ type: 'SETTLE_SUMMARY' });
   });
 

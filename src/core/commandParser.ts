@@ -86,7 +86,7 @@ export function parseThaiDateRange(
 }
 
 export function parseCommand(text: string, refYear = 2026, refMonth = 12): ParsedCommand {
-  const trimmed = text.trim();
+  const trimmed = text.trim().replace(/^@\S+\s+/, '');
   if (!trimmed.startsWith('/')) return { type: 'UNKNOWN' };
 
   const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
