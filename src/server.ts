@@ -932,6 +932,13 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'JOIN_TRIP' && userId) {
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" จบไปแล้วครับ` }],
+      });
+      return;
+    }
     await ensureMemberInTrip(trip.id, groupId, userId);
     const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     await lineClient.replyMessage({
@@ -967,6 +974,13 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'ADD_GUEST') {
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ทริป "${trip.name}" จบไปแล้วครับ` }],
+      });
+      return;
+    }
     db.insert(tripMembers)
       .values({
         tripId: trip.id,
@@ -1384,9 +1398,16 @@ async function handlePostback(
 
   if (action === 'join_trip' && userId) {
     const tripId = Number(params.get('tripId'));
-    await ensureMemberInTrip(tripId, groupId, userId);
     const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
     if (!trip) return;
+    if (trip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'ทริปจบไปแล้ว' }],
+      });
+      return;
+    }
+    await ensureMemberInTrip(tripId, groupId, userId);
     const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, tripId)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
@@ -1406,6 +1427,15 @@ async function handlePostback(
 
   if (action === 'start_trip_now') {
     const tripId = Number(params.get('tripId'));
+    const existingTrip = db.select().from(trips).where(eq(trips.id, tripId)).get();
+    if (!existingTrip) return;
+    if (existingTrip.status === 'COMPLETED') {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'ทริปจบไปแล้ว' }],
+      });
+      return;
+    }
     db.update(trips).set({ status: 'LOCKED' }).where(eq(trips.id, tripId)).run();
     const trip = db.select().from(trips).where(eq(trips.id, tripId)).get();
     if (!trip) return;
