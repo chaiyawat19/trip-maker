@@ -78,17 +78,102 @@ export function buildWelcomeFlex(): FlexMessage {
   };
 }
 
+function renderMemberAvatar(
+  m: { displayName: string; avatarUrl?: string | null; isGuest: boolean },
+  px = 28,
+): messagingApi.FlexBox {
+  const radius = `${Math.round(px / 2)}px`;
+  const size = `${px}px`;
+  const initial = (m.displayName || '?').slice(0, 1);
+
+  if (m.avatarUrl && m.avatarUrl.startsWith('https://')) {
+    return {
+      type: 'box',
+      layout: 'vertical',
+      width: size,
+      height: size,
+      cornerRadius: radius,
+      contents: [
+        {
+          type: 'image',
+          url: m.avatarUrl,
+          size: 'full',
+          aspectRatio: '1:1',
+          aspectMode: 'cover',
+        },
+      ],
+    };
+  }
+
+  return {
+    type: 'box',
+    layout: 'vertical',
+    width: size,
+    height: size,
+    cornerRadius: radius,
+    backgroundColor: m.isGuest ? THEME.maybeBg : THEME.lavenderHaze,
+    justifyContent: 'center',
+    alignItems: 'center',
+    contents: [
+      {
+        type: 'text',
+        text: initial,
+        size: px >= 34 ? 'sm' : 'xxs',
+        color: m.isGuest ? THEME.maybeText : THEME.velvetGrape,
+      },
+    ],
+  };
+}
+
 export function buildTripCreatedFlex(params: {
   tripId: number;
   tripName: string;
   status: string;
   lockedStartDate?: string | null;
   lockedEndDate?: string | null;
-  members: Array<{ displayName: string; isGuest: boolean }>;
+  members: Array<{ displayName: string; avatarUrl?: string | null; isGuest: boolean }>;
 }): FlexMessage {
-  const memberList =
-    params.members.map((m) => m.displayName + (m.isGuest ? ' (Guest)' : '')).join(', ') ||
-    'ยังไม่มีสมาชิก';
+  const memberRows: messagingApi.FlexBox[] =
+    params.members.length === 0
+      ? [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [{ type: 'text', text: 'ยังไม่มีสมาชิก', size: 'xs', color: THEME.textSecondary }],
+          },
+        ]
+      : params.members.slice(0, 8).map((m) => ({
+          type: 'box',
+          layout: 'horizontal',
+          spacing: 'sm',
+          alignItems: 'center',
+          contents: [
+            renderMemberAvatar(m, 26),
+            {
+              type: 'text',
+              text: m.displayName + (m.isGuest ? ' (Guest)' : ''),
+              size: 'xs',
+              color: THEME.velvetGrape,
+              flex: 1,
+              wrap: true,
+            },
+          ],
+        }));
+
+  if (params.members.length > 8) {
+    memberRows.push({
+      type: 'box',
+      layout: 'horizontal',
+      contents: [
+        {
+          type: 'text',
+          text: `และอีก ${params.members.length - 8} คน (พิมพ์ /สมาชิก เพื่อดูทั้งหมด)`,
+          size: 'xxs',
+          color: THEME.textSecondary,
+        },
+      ],
+    });
+  }
 
   const dateText =
     params.lockedStartDate && params.lockedEndDate
@@ -203,11 +288,10 @@ export function buildTripCreatedFlex(params: {
             margin: 'xs',
           },
           {
-            type: 'text',
-            text: memberList,
-            color: THEME.velvetGrape,
-            size: 'sm',
-            wrap: true,
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'xs',
+            contents: memberRows,
           },
           {
             type: 'box',
