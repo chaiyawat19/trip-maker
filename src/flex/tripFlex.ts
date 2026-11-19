@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME, GRADIENT_HEADER, GRADIENT_SUCCESS, pillBadge } from './theme.js';
+import { THEME, GRADIENT_HEADER, GRADIENT_SUCCESS, pillBadge, sectionTitle, stepTracker, actionRow } from './theme.js';
 import { formatThaiRange } from '../core/dateMatcher.js';
 import { buildLiffBillsUrl } from '../core/promptpay.js';
 
@@ -138,33 +138,52 @@ export function buildTripCreatedFlex(params: {
   lockedEndDate?: string | null;
   members: Array<{ displayName: string; avatarUrl?: string | null; isGuest: boolean }>;
 }): FlexMessage {
-  const memberRows: messagingApi.FlexBox[] =
-    params.members.length === 0
-      ? [
-          {
-            type: 'box',
-            layout: 'horizontal',
-            contents: [{ type: 'text', text: 'ยังไม่มีสมาชิก', size: 'xs', color: THEME.textSecondary }],
-          },
-        ]
-      : params.members.slice(0, 8).map((m) => ({
-          type: 'box',
-          layout: 'horizontal',
-          spacing: 'sm',
-          alignItems: 'center',
-          contents: [
-            renderMemberAvatar(m, 26),
-            {
-              type: 'text',
-              text: m.displayName + (m.isGuest ? ' (Guest)' : ''),
-              size: 'xs',
-              color: THEME.velvetGrape,
-              flex: 1,
-              wrap: true,
-            },
-          ],
-        }));
+  const shownMembers = params.members.slice(0, 8);
+  const memberChip = (m: { displayName: string; avatarUrl?: string | null; isGuest: boolean }): messagingApi.FlexBox => ({
+    type: 'box',
+    layout: 'horizontal',
+    flex: 1,
+    spacing: 'sm',
+    alignItems: 'center',
+    backgroundColor: THEME.surface,
+    borderWidth: '1px',
+    borderColor: THEME.border,
+    cornerRadius: '999px',
+    paddingAll: '4px',
+    paddingEnd: '10px',
+    contents: [
+      renderMemberAvatar(m, 24),
+      {
+        type: 'text',
+        text: m.displayName + (m.isGuest ? ' (Guest)' : ''),
+        size: 'xxs',
+        color: THEME.velvetGrape,
+        flex: 1,
+        maxLines: 1,
+      },
+    ],
+  });
 
+  const memberRows: messagingApi.FlexBox[] = [];
+  if (shownMembers.length === 0) {
+    memberRows.push({
+      type: 'box',
+      layout: 'horizontal',
+      contents: [{ type: 'text', text: 'ยังไม่มีสมาชิก กด "เข้าร่วมทริป" ด้านล่างได้เลย', size: 'xxs', color: THEME.textSecondary, wrap: true }],
+    });
+  }
+  for (let i = 0; i < shownMembers.length; i += 2) {
+    const pair = shownMembers.slice(i, i + 2);
+    memberRows.push({
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'sm',
+      contents: [
+        memberChip(pair[0]),
+        pair[1] ? memberChip(pair[1]) : { type: 'box', layout: 'vertical', flex: 1, contents: [] },
+      ],
+    });
+  }
   if (params.members.length > 8) {
     memberRows.push({
       type: 'box',
@@ -172,7 +191,7 @@ export function buildTripCreatedFlex(params: {
       contents: [
         {
           type: 'text',
-          text: `และอีก ${params.members.length - 8} คน (พิมพ์ /สมาชิก เพื่อดูทั้งหมด)`,
+          text: `และอีก ${params.members.length - 8} คน • พิมพ์ /สมาชิก เพื่อดูทั้งหมด`,
           size: 'xxs',
           color: THEME.textSecondary,
         },
@@ -181,70 +200,84 @@ export function buildTripCreatedFlex(params: {
   }
 
   const pickWebUrl = `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?tripId=${params.tripId}`;
+  const hasDates = Boolean(params.lockedStartDate && params.lockedEndDate);
 
-  const dateText =
-    params.lockedStartDate && params.lockedEndDate
-      ? formatThaiRange(params.lockedStartDate, params.lockedEndDate)
-      : params.status === 'LOCKED'
-        ? 'ยังไม่ได้กำหนด (กดปุ่มเลือกวันที่ในเว็บด้านล่าง)'
-        : 'รอนัดวันว่าง (กดปุ่มเลือกวันที่ในเว็บด้านล่าง)';
+  let dayCount = 0;
+  if (params.lockedStartDate && params.lockedEndDate) {
+    const s = new Date(`${params.lockedStartDate}T00:00:00Z`).getTime();
+    const e = new Date(`${params.lockedEndDate}T00:00:00Z`).getTime();
+    dayCount = Math.round((e - s) / 86400000) + 1;
+  }
 
-  const nextStepsText =
-    params.status === 'LOCKED'
-      ? [
-          '• กด "เลือกวันที่ในเว็บ" ด้านล่างเพื่อกำหนดหรือเปลี่ยนวันเดินทาง',
-          '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
-          '• /หาร — เปิดเว็บ LIFF จดบิลหารเงิน & สแกน QR พร้อมเพย์',
-          '• /สรุปยอด — ดูยอดโอนสุทธิและเคลียร์เงิน',
-          '• /ปิดทริป — ปิดทริปเมื่อเคลียร์ยอดครบแล้ว',
-        ].join('\n')
-      : [
-          '• กด "เลือกวันที่ในเว็บ" ด้านล่างเพื่อเลือกช่วงวันและวันว่างของทุกคน',
-          '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
-          '• /เปลี่ยนชื่อทริป <ชื่อใหม่> — แก้ไขชื่อทริป',
-          '• /เริ่มทริป — ข้ามการโหวตเพื่อเปิดหารเงินทันที',
-        ].join('\n');
+  const dateText = hasDates ? formatThaiRange(params.lockedStartDate!, params.lockedEndDate!) : 'ยังไม่กำหนด';
+  const dateSub = hasDates ? `${dayCount} วัน ${Math.max(dayCount - 1, 0)} คืน` : 'เลือกในเว็บได้เลย';
 
-  const footerButtons: messagingApi.FlexButton[] = [
+  const isLocked = params.status === 'LOCKED';
+  const isCompleted = params.status === 'COMPLETED';
+  const activeStep = isCompleted ? 4 : isLocked ? (hasDates ? 2 : 1) : params.members.length > 1 ? 1 : 0;
+
+  const actions: messagingApi.FlexBox[] = isLocked
+    ? [
+        actionRow('1', 'เลือก / เปลี่ยนวันเดินทาง', 'กดปุ่มด้านล่างเพื่อจัดการในเว็บ'),
+        actionRow('2', '/หาร จดบิลหารเงิน', 'เปิดเว็บจดบิลและสแกน QR พร้อมเพย์'),
+        actionRow('3', '/สรุปยอด เคลียร์เงิน', 'ดูว่าใครต้องโอนให้ใครเท่าไร'),
+        actionRow('4', '/ปิดทริป', 'ปิดทริปเมื่อเคลียร์ยอดครบแล้ว'),
+      ]
+    : [
+        actionRow('1', 'ชวนเพื่อนกด "เข้าร่วมทริป"', 'หรือ /เพิ่มคน <ชื่อ> สำหรับคนนอกกลุ่ม'),
+        actionRow('2', 'เลือกวันว่างในเว็บ', 'ระบบหาช่วงที่ทุกคนว่างตรงกันให้เอง'),
+        actionRow('3', 'ล็อกวัน แล้วเริ่มทริป', 'หรือกด "เริ่มทริปเลย" เพื่อเปิดหารเงินทันที'),
+      ];
+
+  const footerButtons: messagingApi.FlexComponent[] = [
     {
       type: 'button',
       style: 'primary',
       color: THEME.primary,
-      height: 'sm',
+      height: 'md',
       action: {
         type: 'uri',
-        label: params.status === 'LOCKED' ? 'เลือก / เปลี่ยนวันเดินทางในเว็บ' : 'เลือกวันที่ในเว็บ',
+        label: isLocked ? 'จัดการวันเดินทางในเว็บ' : 'เลือกวันว่างในเว็บ',
         uri: pickWebUrl,
       },
     },
   ];
 
   if (params.status === 'PLANNING') {
-    footerButtons.push(
-      {
-        type: 'button',
-        style: 'secondary',
-        color: THEME.lavenderHaze,
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: 'เข้าร่วมทริป',
-          data: `action=join_trip&tripId=${params.tripId}`,
+    footerButtons.push({
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'secondary',
+          color: THEME.lavenderHaze,
+          height: 'sm',
+          flex: 1,
+          action: {
+            type: 'postback',
+            label: 'เข้าร่วมทริป',
+            data: `action=join_trip&tripId=${params.tripId}`,
+          },
         },
-      },
-      {
-        type: 'button',
-        style: 'secondary',
-        color: THEME.lavenderTint,
-        height: 'sm',
-        action: {
-          type: 'postback',
-          label: 'เริ่มทริปเลย',
-          data: `action=start_trip_now&tripId=${params.tripId}`,
+        {
+          type: 'button',
+          style: 'secondary',
+          color: THEME.lavenderTint,
+          height: 'sm',
+          flex: 1,
+          action: {
+            type: 'postback',
+            label: 'เริ่มทริปเลย',
+            data: `action=start_trip_now&tripId=${params.tripId}`,
+          },
         },
-      },
-    );
+      ],
+    });
   }
+
+  const statusText = isLocked ? 'เริ่มทริปแล้ว' : isCompleted ? 'ปิดทริปแล้ว' : 'กำลังวางแผน';
 
   return {
     type: 'flex',
@@ -255,8 +288,9 @@ export function buildTripCreatedFlex(params: {
       header: {
         type: 'box',
         layout: 'vertical',
-        background: params.status === 'COMPLETED' ? GRADIENT_SUCCESS : GRADIENT_HEADER,
-        paddingAll: '18px',
+        background: isCompleted ? GRADIENT_SUCCESS : GRADIENT_HEADER,
+        paddingAll: '20px',
+        paddingBottom: '22px',
         contents: [
           {
             type: 'box',
@@ -264,96 +298,99 @@ export function buildTripCreatedFlex(params: {
             alignItems: 'center',
             contents: [
               pillBadge(
-                params.status === 'LOCKED' ? 'เริ่มทริปแล้ว' : params.status === 'COMPLETED' ? 'ปิดทริปแล้ว' : 'กำลังวางแผน',
-                params.status === 'LOCKED' ? THEME.freeBg : THEME.lavenderHaze,
-                params.status === 'LOCKED' ? THEME.freeText : THEME.velvetGrape,
+                statusText,
+                isLocked ? THEME.freeBg : THEME.lavenderHaze,
+                isLocked ? THEME.freeText : THEME.velvetGrape,
               ),
-              {
-                type: 'text',
-                text: `${params.members.length} สมาชิก`,
-                size: 'xs',
-                color: THEME.lavenderHaze,
-                align: 'end',
-                flex: 1,
-              },
+              { type: 'text', text: 'PROMPTPAI', size: 'xxs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
             ],
           },
           {
             type: 'text',
             text: params.tripName,
             color: THEME.surface,
-            size: 'xl',
-            margin: 'md',
+            size: 'xxl',
+            margin: 'lg',
             wrap: true,
+          },
+          {
+            type: 'text',
+            text: hasDates ? `${dateText} • ${params.members.length} คน` : `${params.members.length} คนในแก๊ง • รอนัดวัน`,
+            color: THEME.lavenderHaze,
+            size: 'xs',
+            margin: 'xs',
           },
         ],
       },
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: '16px',
+        spacing: 'lg',
+        paddingAll: '18px',
         contents: [
+          stepTracker(['รวมแก๊ง', 'นัดวัน', 'จดบิล', 'เคลียร์เงิน'], activeStep),
           {
             type: 'box',
             layout: 'horizontal',
-            alignItems: 'center',
-            backgroundColor: THEME.lavenderTint,
-            borderWidth: '1px',
-            borderColor: THEME.border,
-            cornerRadius: '12px',
-            paddingAll: '10px',
+            spacing: 'sm',
             contents: [
-              { type: 'text', text: 'วันเดินทาง', size: 'xs', color: THEME.primary, flex: 2 },
-              { type: 'text', text: dateText, size: 'xs', color: THEME.velvetGrape, flex: 5, align: 'end', wrap: true },
+              {
+                type: 'box',
+                layout: 'vertical',
+                flex: 3,
+                backgroundColor: hasDates ? THEME.lavenderHaze : THEME.lavenderTint,
+                cornerRadius: '14px',
+                paddingAll: '12px',
+                spacing: 'xs',
+                contents: [
+                  { type: 'text', text: 'วันเดินทาง', size: 'xxs', color: THEME.textSecondary },
+                  { type: 'text', text: dateText, size: 'md', color: THEME.velvetGrape, wrap: true },
+                  { type: 'text', text: dateSub, size: 'xxs', color: THEME.primary },
+                ],
+              },
+              {
+                type: 'box',
+                layout: 'vertical',
+                flex: 2,
+                backgroundColor: THEME.lavenderTint,
+                cornerRadius: '14px',
+                paddingAll: '12px',
+                spacing: 'xs',
+                contents: [
+                  { type: 'text', text: 'สมาชิก', size: 'xxs', color: THEME.textSecondary },
+                  { type: 'text', text: `${params.members.length}`, size: 'md', color: THEME.velvetGrape },
+                  { type: 'text', text: 'คน', size: 'xxs', color: THEME.primary },
+                ],
+              },
             ],
           },
           {
             type: 'box',
             layout: 'vertical',
-            borderWidth: '1px',
-            borderColor: THEME.border,
-            cornerRadius: '12px',
-            paddingAll: '12px',
-            spacing: 'xs',
-            contents: [
-              {
-                type: 'text',
-                text: `สมาชิก (${params.members.length} คน)`,
-                color: THEME.primary,
-                size: 'xxs',
-              },
-              ...memberRows,
-            ],
+            spacing: 'sm',
+            contents: [sectionTitle('สมาชิกในแก๊ง', `${params.members.length} คน`), ...memberRows],
           },
+          { type: 'separator', color: THEME.border },
           {
             type: 'box',
             layout: 'vertical',
-            backgroundColor: THEME.lavenderTint,
-            borderWidth: '1px',
-            borderColor: THEME.border,
-            cornerRadius: '12px',
-            paddingAll: '12px',
-            spacing: 'xs',
-            contents: [
-              { type: 'text', text: 'นัดวันกับเพื่อนเลย', size: 'xxs', color: THEME.primary },
-              {
-                type: 'text',
-                text: nextStepsText,
-                size: 'xxs',
-                color: THEME.velvetGrape,
-                wrap: true,
-              },
-            ],
+            spacing: 'md',
+            contents: [sectionTitle(isLocked ? 'ทำต่อได้เลย' : 'นัดวันกับเพื่อนเลย'), ...actions],
           },
         ],
       },
-      footer: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'sm',
-        contents: footerButtons,
-      },
+      ...(isCompleted
+        ? {}
+        : {
+            footer: {
+              type: 'box',
+              layout: 'vertical',
+              spacing: 'sm',
+              paddingAll: '14px',
+              paddingTop: '0px',
+              contents: footerButtons,
+            },
+          }),
     },
   };
 }

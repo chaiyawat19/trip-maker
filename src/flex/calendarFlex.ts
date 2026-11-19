@@ -1,5 +1,5 @@
 import type { messagingApi } from '@line/bot-sdk';
-import { THEME, GRADIENT_HEADER, pillBadge } from './theme.js';
+import { THEME, GRADIENT_HEADER, pillBadge, sectionTitle, progressBar } from './theme.js';
 import {
   enumerateDates,
   findMutualFreeStreaks,
@@ -55,13 +55,16 @@ export function buildCalendarPollFlex(params: {
     dayMap.set(r.date, entry);
   }
 
-  function cellColors(date: string): { bg: string; fg: string; sub: string } {
+  function cellColors(date: string): { bg: string; fg: string; sub: string; border: string } {
     const counts = dayMap.get(date);
-    if (!counts) return { bg: THEME.lavenderTint, fg: THEME.velvetGrape, sub: `0/${totalMembers}` };
+    if (!counts) return { bg: THEME.surface, fg: THEME.textSecondary, sub: '-', border: THEME.border };
     const sub = `${counts.free}/${totalMembers}`;
-    if (counts.busy > 0) return { bg: THEME.busyBg, fg: THEME.busyText, sub };
-    if (counts.maybe > 0) return { bg: THEME.maybeBg, fg: THEME.maybeText, sub };
-    return { bg: THEME.freeBg, fg: THEME.freeText, sub };
+    if (totalMembers > 0 && counts.free === totalMembers) {
+      return { bg: THEME.primary, fg: THEME.surface, sub, border: THEME.primary };
+    }
+    if (counts.busy > 0) return { bg: THEME.busyBg, fg: THEME.busyText, sub, border: THEME.busyBg };
+    if (counts.maybe > 0) return { bg: THEME.maybeBg, fg: THEME.maybeText, sub, border: THEME.maybeBg };
+    return { bg: THEME.freeBg, fg: THEME.freeText, sub, border: THEME.freeBg };
   }
 
   // Build 7-column calendar rows (Mon=0 .. Sun=6)
@@ -74,15 +77,17 @@ export function buildCalendarPollFlex(params: {
   }
   for (const d of allDates) {
     const dayNum = String(Number(d.slice(8, 10)));
-    const { bg, fg, sub } = cellColors(d);
+    const { bg, fg, sub, border } = cellColors(d);
     cells.push({
       type: 'box',
       layout: 'vertical',
       flex: 1,
       backgroundColor: bg,
-      cornerRadius: '8px',
-      paddingTop: '4px',
-      paddingBottom: '4px',
+      borderWidth: '1px',
+      borderColor: border,
+      cornerRadius: '10px',
+      paddingTop: '5px',
+      paddingBottom: '5px',
       alignItems: 'center',
       justifyContent: 'center',
       contents: [
@@ -120,15 +125,30 @@ export function buildCalendarPollFlex(params: {
   };
 
   // Per-member availability breakdown
+  const initialBadge = (name: string, responded: boolean): messagingApi.FlexBox => ({
+    type: 'box',
+    layout: 'vertical',
+    width: '24px',
+    height: '24px',
+    cornerRadius: '12px',
+    backgroundColor: responded ? THEME.lavenderHaze : THEME.lavenderTint,
+    justifyContent: 'center',
+    alignItems: 'center',
+    contents: [{ type: 'text', text: (name || '?').slice(0, 1), size: 'xxs', color: responded ? THEME.velvetGrape : THEME.textSecondary, align: 'center' }],
+  });
+
   const memberRows: messagingApi.FlexBox[] = params.members.map((member) => {
     const myRecords = params.records.filter((r) => r.memberId === member.id);
     if (myRecords.length === 0) {
       return {
         type: 'box',
         layout: 'horizontal',
+        spacing: 'sm',
+        alignItems: 'center',
         contents: [
-          { type: 'text', text: member.displayName, size: 'xxs', color: THEME.velvetGrape, flex: 2 },
-          { type: 'text', text: 'ยังไม่ตอบ', size: 'xxs', color: THEME.textSecondary, flex: 5, align: 'end' },
+          initialBadge(member.displayName, false),
+          { type: 'text', text: member.displayName, size: 'xs', color: THEME.textSecondary, flex: 3, maxLines: 1 },
+          pillBadge('ยังไม่ตอบ', THEME.lavenderTint, THEME.textSecondary),
         ],
       };
     }
@@ -137,17 +157,20 @@ export function buildCalendarPollFlex(params: {
     const maybeDays = myRecords.filter((r) => r.status === 'MAYBE').map((r) => Number(r.date.slice(8, 10)));
     const busyDays = myRecords.filter((r) => r.status === 'BUSY').map((r) => Number(r.date.slice(8, 10)));
 
-    const parts: string[] = [];
-    if (freeDays.length > 0) parts.push(`ว่าง ${compressDayNumbers(freeDays)}`);
-    if (maybeDays.length > 0) parts.push(`อาจจะ ${compressDayNumbers(maybeDays)}`);
-    if (busyDays.length > 0) parts.push(`ไม่ว่าง ${compressDayNumbers(busyDays)}`);
+    const detail: messagingApi.FlexComponent[] = [];
+    if (freeDays.length > 0) detail.push({ type: 'text', text: `ว่าง ${compressDayNumbers(freeDays)}`, size: 'xxs', color: THEME.freeText, wrap: true });
+    if (maybeDays.length > 0) detail.push({ type: 'text', text: `อาจจะ ${compressDayNumbers(maybeDays)}`, size: 'xxs', color: THEME.maybeText, wrap: true });
+    if (busyDays.length > 0) detail.push({ type: 'text', text: `ไม่ว่าง ${compressDayNumbers(busyDays)}`, size: 'xxs', color: THEME.busyText, wrap: true });
 
     return {
       type: 'box',
       layout: 'horizontal',
+      spacing: 'sm',
+      alignItems: 'center',
       contents: [
-        { type: 'text', text: member.displayName, size: 'xxs', color: THEME.velvetGrape, flex: 2 },
-        { type: 'text', text: parts.join(' | '), size: 'xxs', color: THEME.primary, flex: 5, align: 'end', wrap: true },
+        initialBadge(member.displayName, true),
+        { type: 'text', text: member.displayName, size: 'xs', color: THEME.velvetGrape, flex: 3, maxLines: 1 },
+        { type: 'box', layout: 'vertical', flex: 5, contents: detail },
       ],
     };
   });
@@ -161,47 +184,98 @@ export function buildCalendarPollFlex(params: {
   });
   const best = params.topWindows[0];
   const pollRangeText = formatThaiRange(params.startDate, params.endDate, params.durationDays);
+  const respondedPct = totalMembers > 0 ? (params.respondedCount / totalMembers) * 100 : 0;
 
-  const recommendContents: messagingApi.FlexComponent[] = [];
+  const recommendSection: messagingApi.FlexComponent[] = [];
   if (mutualStreaks.length > 0) {
-    recommendContents.push({
-      type: 'text',
-      text: `ทุกคนว่างตรงกัน (${mutualStreaks.length} ช่วง) คุยตกลงกันแล้วค่อยล็อกวัน:`,
-      size: 'xs',
-      color: THEME.velvetGrape,
-      wrap: true,
-    });
+    recommendSection.push(sectionTitle('ทุกคนว่างตรงกัน', `${mutualStreaks.length} ช่วง`));
     for (const streak of mutualStreaks) {
-      recommendContents.push({
-        type: 'text',
-        text: `• ${formatThaiRange(streak.startDate, streak.endDate)} (${streak.daysCount} วัน)`,
-        size: 'xs',
-        color: THEME.primary,
-        wrap: true,
+      recommendSection.push({
+        type: 'box',
+        layout: 'horizontal',
+        alignItems: 'center',
+        spacing: 'md',
+        background: GRADIENT_HEADER,
+        cornerRadius: '14px',
+        paddingAll: '12px',
+        contents: [
+          {
+            type: 'box',
+            layout: 'vertical',
+            width: '44px',
+            height: '44px',
+            cornerRadius: '12px',
+            backgroundColor: THEME.lavenderHaze,
+            justifyContent: 'center',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: String(streak.daysCount), size: 'md', color: THEME.velvetGrape, align: 'center' },
+              { type: 'text', text: 'วัน', size: 'xxs', color: THEME.velvetGrape, align: 'center' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            flex: 1,
+            contents: [
+              { type: 'text', text: formatThaiRange(streak.startDate, streak.endDate), size: 'md', color: THEME.surface },
+              { type: 'text', text: `ว่างครบ ${totalMembers} คน ติดกัน ${streak.daysCount} วัน`, size: 'xxs', color: THEME.lavenderHaze, wrap: true },
+            ],
+          },
+        ],
       });
     }
-  } else {
-    recommendContents.push({
+    recommendSection.push({
       type: 'text',
-      text: 'ยังไม่มีวันที่ทุกคนว่างตรงกัน 100%',
-      size: 'xs',
-      color: THEME.velvetGrape,
+      text: 'คุยกันในกลุ่มก่อน แล้วค่อยกดล็อกวันที่ตกลงกันได้เลย',
+      size: 'xxs',
+      color: THEME.textSecondary,
       wrap: true,
     });
+  } else {
+    const pending = params.members.filter((m) => !params.records.some((r) => r.memberId === m.id)).map((m) => m.displayName);
+    const tips: messagingApi.FlexComponent[] = [
+      { type: 'text', text: 'ยังไม่มีวันที่ทุกคนว่างตรงกัน', size: 'sm', color: THEME.velvetGrape, wrap: true },
+    ];
+    if (pending.length > 0) {
+      tips.push({ type: 'text', text: `รอ ${pending.join(', ')} ลงวันว่าง`, size: 'xxs', color: THEME.textSecondary, wrap: true });
+    }
     if (best) {
       const missingNames = [...best.busyMemberIds, ...best.pendingMemberIds]
         .map((id) => memberNameMap.get(id))
         .filter(Boolean);
-      const suffix = missingNames.length > 0 ? ` • รอ: ${missingNames.join(', ')}` : '';
-      recommendContents.push({
+      tips.push({
         type: 'text',
-        text: `• ใกล้เคียงสุด: ${formatThaiRange(best.startDate, best.endDate, params.durationDays)} (${best.freeMemberIds.length}/${totalMembers}${suffix})`,
+        text: `ใกล้เคียงสุด: ${formatThaiRange(best.startDate, best.endDate, params.durationDays)} (ว่าง ${best.freeMemberIds.length}/${totalMembers}${missingNames.length > 0 ? ` • ติด ${missingNames.join(', ')}` : ''})`,
         size: 'xxs',
-        color: THEME.textSecondary,
+        color: THEME.primary,
         wrap: true,
       });
     }
+    recommendSection.push({
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: THEME.lavenderTint,
+      borderWidth: '1px',
+      borderColor: THEME.border,
+      cornerRadius: '14px',
+      paddingAll: '12px',
+      spacing: 'xs',
+      contents: tips,
+    });
   }
+
+  const legendItem = (bg: string, label: string, border?: string): messagingApi.FlexBox => ({
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'xs',
+    alignItems: 'center',
+    flex: 0,
+    contents: [
+      { type: 'box', layout: 'vertical', width: '10px', height: '10px', cornerRadius: '3px', backgroundColor: bg, borderWidth: border ? '1px' : '0px', borderColor: border ?? bg, contents: [] },
+      { type: 'text', text: label, size: 'xxs', color: THEME.textSecondary, flex: 0 },
+    ],
+  });
 
   return {
     type: 'flex',
@@ -213,67 +287,71 @@ export function buildCalendarPollFlex(params: {
         type: 'box',
         layout: 'vertical',
         background: GRADIENT_HEADER,
-        paddingAll: '18px',
+        paddingAll: '20px',
         contents: [
           {
             type: 'box',
             layout: 'horizontal',
             alignItems: 'center',
             contents: [
-              pillBadge(`ตอบแล้ว ${params.respondedCount}/${totalMembers} คน`, THEME.lavenderHaze, THEME.velvetGrape),
+              pillBadge(isClosed ? 'ปิดทริปแล้ว' : 'นัดวันว่าง', THEME.lavenderHaze, THEME.velvetGrape),
               { type: 'text', text: pollRangeText, size: 'xs', color: THEME.lavenderHaze, align: 'end', flex: 1 },
             ],
           },
           {
             type: 'text',
             text: params.tripName,
-            size: 'lg',
+            size: 'xl',
             color: THEME.surface,
-            margin: 'md',
-          },
-          {
-            type: 'text',
-            text: 'กดปุ่มด้านล่างเพื่อเลือกวันว่างในเว็บ',
-            size: 'xs',
-            color: THEME.lavenderHaze,
-            margin: 'xs',
+            margin: 'lg',
             wrap: true,
           },
+          {
+            type: 'box',
+            layout: 'horizontal',
+            margin: 'md',
+            contents: [
+              { type: 'text', text: 'ลงวันว่างแล้ว', size: 'xxs', color: THEME.lavenderHaze, flex: 1 },
+              { type: 'text', text: `${params.respondedCount}/${totalMembers} คน`, size: 'xxs', color: THEME.surface, align: 'end' },
+            ],
+          },
+          { ...progressBar(respondedPct), margin: 'sm' },
         ],
       },
       body: {
         type: 'box',
         layout: 'vertical',
-        spacing: 'sm',
-        paddingAll: '14px',
+        spacing: 'md',
+        paddingAll: '16px',
         contents: [
-          weekdayHeader,
-          ...weekRows,
+          ...recommendSection,
+          { type: 'separator', color: THEME.border, margin: 'md' },
           {
             type: 'box',
             layout: 'vertical',
-            backgroundColor: THEME.lavenderTint,
-            borderWidth: '1px',
-            borderColor: THEME.border,
-            cornerRadius: '12px',
-            paddingAll: '10px',
             spacing: 'xs',
-            margin: 'sm',
-            contents: [
-              { type: 'text', text: 'สถานะรายคน', size: 'xxs', color: THEME.primary },
-              ...memberRows,
-            ],
+            margin: 'md',
+            contents: [weekdayHeader, ...weekRows],
           },
           {
             type: 'box',
+            layout: 'horizontal',
+            spacing: 'md',
+            justifyContent: 'center',
+            contents: [
+              legendItem(THEME.primary, 'ว่างครบ'),
+              legendItem(THEME.freeBg, 'ว่างบางคน'),
+              legendItem(THEME.maybeBg, 'อาจจะ'),
+              legendItem(THEME.busyBg, 'ไม่ว่าง'),
+            ],
+          },
+          { type: 'separator', color: THEME.border, margin: 'md' },
+          {
+            type: 'box',
             layout: 'vertical',
-            backgroundColor: THEME.lavenderHaze,
-            borderWidth: '1px',
-            borderColor: THEME.primary,
-            cornerRadius: '12px',
-            paddingAll: '10px',
-            spacing: 'xs',
-            contents: recommendContents,
+            spacing: 'sm',
+            margin: 'md',
+            contents: [sectionTitle('สถานะรายคน', `${params.respondedCount}/${totalMembers}`), ...memberRows],
           },
         ],
       },
@@ -284,12 +362,14 @@ export function buildCalendarPollFlex(params: {
               type: 'box',
               layout: 'vertical',
               spacing: 'sm',
+              paddingAll: '14px',
+              paddingTop: '0px',
               contents: [
                 {
                   type: 'button',
                   style: 'primary',
                   color: THEME.primary,
-                  height: 'sm',
+                  height: 'md',
                   action: {
                     type: 'uri',
                     label: 'เลือกวันว่าง / ล็อกวันในเว็บ',
