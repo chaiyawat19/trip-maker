@@ -253,5 +253,7 @@ describe('promptpay & LIFF bill commands', () => {
       startDate: '2026-11-19',
       endDate: '2026-11-21',
     });
+    expect(parseCommand('/คำสั่ง')).toEqual({ type: 'HELP' });
+    expect(parseCommand('/คำสั่งทั้งหมด')).toEqual({ type: 'HELP' });
   });
 });

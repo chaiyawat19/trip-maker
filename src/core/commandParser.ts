@@ -139,6 +139,8 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
     case '/พร้อมเพย์':
       return { type: 'SET_PROMPTPAY', promptpayId: rest };
     case '/วิธีใช้':
+    case '/คำสั่ง':
+    case '/คำสั่งทั้งหมด':
     case '/help':
       return { type: 'HELP' };
     case '/บิล':
