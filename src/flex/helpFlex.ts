@@ -4,59 +4,95 @@ import { THEME } from './theme.js';
 export function buildHelpFlex(): messagingApi.FlexMessage {
   return {
     type: 'flex',
-    altText: 'คู่มือคำสั่ง PromptPai (พร้อมไป)',
+    altText: 'คู่มือการใช้งาน PromptPai (พร้อมไป) แบบละเอียด',
     contents: {
-      type: 'bubble',
-      size: 'mega',
-      header: {
-        type: 'box',
-        layout: 'vertical',
-        backgroundColor: THEME.lavenderTint,
-        paddingAll: '16px',
-        contents: [
-          { type: 'text', text: 'คู่มือคำสั่ง PromptPai (พร้อมไป)', size: 'md', color: THEME.velvetGrape },
-          { type: 'text', text: 'แยกคำสั่งชัดเจน ก๊อปปี้ไปแก้ตัวเลขใช้ได้เลย', size: 'xs', color: THEME.textSecondary, margin: 'xs' },
-        ],
-      },
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        spacing: 'md',
-        paddingAll: '16px',
-        contents: [
-          section(
-            '1. ทริป & สมาชิก',
-            '/สร้างทริป เชียงใหม่\n/เปลี่ยนชื่อทริป เกาะล้าน\n/ทริป (ดู/สลับทริป)\n/เข้าทริป หรือ /เพิ่มคน แฟนเอ\n/เริ่มทริป (เปิดให้หารเงินเลย)\n/ปิดทริป',
-          ),
-          section(
-            '2. หาวันว่างพร้อมกัน',
-            '/นัด 1-15 ธ.ค. 3วัน (เปิดปฏิทินจิ้มวัน)\n/ว่าง 1-5 ธ.ค. | /ไม่ว่าง 6-7 ธ.ค.\n/วันว่าง (ดูสรุป) | /ตามเพื่อน',
-          ),
-          section(
-            '3. หารเงิน (แยก 4 แบบใช้ง่าย)',
-            '• หารเท่าทุกคน:\n  /หารรวม ค่ารถ 2000\n• หารรวม + บวกเพิ่มเฉพาะคน:\n  /หารเพิ่ม ค่าข้าว 1200 +เบียร์ 400 @เอ @บี\n• หารแยกตามรายการ (ขึ้นบรรทัดใหม่):\n  /หารแยก ปิ้งย่าง\n  หมู 600 @เอ @บี\n  เบียร์ 300 @บี\n• กำหนดยอดเอง:\n  /หารเอง ค่าน้ำมัน @เอ=500 @บี=300\n(ต่อท้าย +vat7 หรือ +sc10 ได้ทุกแบบ)',
-          ),
-          section(
-            '4. สรุปยอดโอน',
-            '/บิลทั้งหมด | /สรุปเงิน (/สรุปยอด)',
-          ),
-        ],
-      },
+      type: 'carousel',
+      contents: [
+        helpBubble(
+          '1/4 • เริ่มต้น & จัดการทริป',
+          'ขั้นตอนสร้างทริปและรวมสมาชิก',
+          [
+            item('/สร้างทริป <ชื่อ>', 'สร้างทริปใหม่และตั้งเป็น Active Trip\nตัวอย่าง: /สร้างทริป เชียงใหม่'),
+            item('/เปลี่ยนชื่อทริป <ชื่อใหม่>', 'เปลี่ยนชื่อทริปที่กำลังใช้งานอยู่\nตัวอย่าง: /เปลี่ยนชื่อทริป เกาะล้าน'),
+            item('/เข้าทริป หรือ /เพิ่มคน <ชื่อ>', 'ลงทะเบียนสมาชิก (หรือเพิ่มเพื่อนที่ไม่มีในกลุ่ม)\nตัวอย่าง: /เพิ่มคน แฟนเอ'),
+            item('/ทริป', 'ดูทริปทั้งหมดในกลุ่มและสลับทริปที่ใช้งาน'),
+            item('/เริ่มทริป', 'ข้ามการโหวตวันว่าง เพื่อเปิดหารเงินทันที'),
+          ],
+        ),
+        helpBubble(
+          '2/4 • หาวันว่างพร้อมกัน',
+          'นัดวันและดูปฏิทินความพร้อม',
+          [
+            item('/นัด <ช่วงวัน> <จำนวนวัน>', 'สร้างปฏิทิน 7 ช่องให้ทุกคนกดจิ้มวันได้เลย\nตัวอย่าง: /นัด 1-15 ธ.ค. 3วัน'),
+            item('วิธีจิ้มปฏิทิน', '1. กดเลือกโหมดด้านบน (ว่าง / อาจจะ / ไม่ว่าง)\n2. จิ้มที่ตัวเลขวันที่ ใต้เลขจะโชว์จำนวนคนว่าง\n3. กด "ล็อกวันเริ่มทริป" เมื่อได้วันที่ตรงกัน'),
+            item('/ว่าง /ไม่ว่าง /อาจจะ', 'พิมพ์ลงสถานะแบบเร็วได้เช่นกัน\nตัวอย่าง: /ไม่ว่าง 5-7 ธ.ค.'),
+            item('/วันว่าง และ /ตามเพื่อน', 'ดูสรุปปฏิทินล่าสุด และเช็กว่าใครยังไม่ตอบ'),
+          ],
+        ),
+        helpBubble(
+          '3/4 • หารเงิน 4 รูปแบบ',
+          'ต้องล็อกวันหรือพิมพ์ /เริ่มทริป ก่อนจดบิล',
+          [
+            item('/หารรวม (หารเท่า)', 'หารทุกคนในทริป หรือใส่ @ชื่อ เพื่อหารเฉพาะคน\nตัวอย่าง: /หารรวม ค่ารถ 2000\nตัวอย่าง: /หารรวม กาแฟ 300 @เอ @บี'),
+            item('/หารเพิ่ม (หารรวม+บวกเพิ่ม)', 'ยอดหลักหารทุกคน แล้วบวกรายการพิเศษเฉพาะคน\nตัวอย่าง: /หารเพิ่ม ค่าข้าว 1200 +เบียร์ 400 @เอ @บี'),
+            item('/หารแยก (คิดตามรายการ)', 'ขึ้นบรรทัดใหม่เพื่อใส่ทีละเมนูในข้อความเดียว:\n/หารแยก ปิ้งย่าง\nหมู 600 @เอ @บี\nเบียร์ 300 @บี'),
+            item('/หารเอง (กำหนดยอดเอง)', 'ตัวอย่าง: /หารเอง ค่าน้ำมัน @เอ=500 @บี=300\n(ต่อท้าย +vat7 หรือ +sc10 ได้ทุกคำสั่ง)'),
+          ],
+        ),
+        helpBubble(
+          '4/4 • สรุปยอด & ปิดทริป',
+          'เช็กบิล เคลียร์โอนเงิน และจบงาน',
+          [
+            item('/บิล และ /บิลทั้งหมด', 'ดูรายการบิลทั้งหมดและยอดใช้จ่ายรวมของทริป'),
+            item('/สรุปยอด (หรือ /สรุปเงิน)', 'คำนวณยอดสุทธิและลดจำนวนรอบการโอนให้อัตโนมัติ'),
+            item('วิธีอัปเดตสถานะโอนเงิน', 'กดปุ่มบนการ์ดสรุปยอด: โอนแล้ว → ยืนยันรับ → เคลียร์แล้ว\n(ระบบจำสถานะไว้ให้ แม้พิมพ์ /สรุปยอด ซ้ำ)'),
+            item('/ปิดทริป', 'ปิดทริปเมื่อเคลียร์เงินครบ เพื่อเก็บประวัติและเริ่มทริปใหม่'),
+          ],
+        ),
+      ],
     },
   };
 }
 
-function section(title: string, commands: string): messagingApi.FlexBox {
+function helpBubble(
+  title: string,
+  subtitle: string,
+  rows: messagingApi.FlexBox[],
+): messagingApi.FlexBubble {
+  return {
+    type: 'bubble',
+    size: 'mega',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      backgroundColor: THEME.lavenderTint,
+      paddingAll: '14px',
+      contents: [
+        { type: 'text', text: title, size: 'sm', color: THEME.velvetGrape },
+        { type: 'text', text: subtitle, size: 'xxs', color: THEME.primary, margin: 'xs' },
+      ],
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'sm',
+      paddingAll: '14px',
+      contents: rows,
+    },
+  };
+}
+
+function item(cmd: string, desc: string): messagingApi.FlexBox {
   return {
     type: 'box',
     layout: 'vertical',
-    spacing: 'xs',
     backgroundColor: THEME.lavenderTint,
     cornerRadius: '10px',
     paddingAll: '10px',
+    spacing: 'xs',
     contents: [
-      { type: 'text', text: title, size: 'xs', color: THEME.primary },
-      { type: 'text', text: commands, size: 'xxs', color: THEME.velvetGrape, wrap: true },
+      { type: 'text', text: cmd, size: 'xs', color: THEME.primary, wrap: true },
+      { type: 'text', text: desc, size: 'xxs', color: THEME.velvetGrape, wrap: true },
     ],
   };
 }

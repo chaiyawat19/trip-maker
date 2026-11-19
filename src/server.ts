@@ -30,7 +30,7 @@ import {
   buildTripCompletedFlex,
 } from './flex/tripFlex.js';
 import { buildCalendarPollFlex } from './flex/calendarFlex.js';
-import { buildBillReceiptFlex } from './flex/billFlex.js';
+import { buildBillReceiptFlex, buildBillMenuFlex } from './flex/billFlex.js';
 import { buildSettlementFlex } from './flex/settlementFlex.js';
 import { buildHelpFlex } from './flex/helpFlex.js';
 
@@ -762,24 +762,21 @@ async function handleTextMessage(
     return;
   }
 
-  if (parsed.type === 'LIST_BILLS') {
+  if (parsed.type === 'OPEN_BILL_BUILDER' || parsed.type === 'LIST_BILLS') {
     const tripBills = db.select().from(bills).where(eq(bills.tripId, trip.id)).all();
-    if (tripBills.length === 0) {
-      await lineClient.replyMessage({
-        replyToken: event.replyToken,
-        messages: [{ type: 'text', text: `ทริป "${trip.name}" ยังไม่มีบิลค่าใช้จ่ายครับ` }],
-      });
-      return;
-    }
-    const total = tripBills.reduce((s, b) => s + b.totalAmount, 0);
-    const lines = tripBills.map((b, idx) => `${idx + 1}. ${b.title} — ${b.totalAmount.toLocaleString()} ฿`);
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [
-        {
-          type: 'text',
-          text: `บิลทั้งหมดของ "${trip.name}" (${tripBills.length} บิล | รวม ${total.toLocaleString()} ฿):\n${lines.join('\n')}`,
-        },
+        buildBillMenuFlex({
+          tripName: trip.name,
+          tripStatus: trip.status,
+          bills: tripBills.map((b) => ({
+            id: b.id,
+            title: b.title,
+            totalAmount: b.totalAmount,
+            splitMode: b.splitMode,
+          })),
+        }),
       ],
     });
     return;
