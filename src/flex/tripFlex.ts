@@ -1,6 +1,7 @@
 import type { messagingApi } from '@line/bot-sdk';
 import { THEME } from './theme.js';
 import { formatThaiRange } from '../core/dateMatcher.js';
+import { buildLiffBillsUrl } from '../core/promptpay.js';
 
 type FlexMessage = messagingApi.FlexMessage;
 
@@ -89,11 +90,34 @@ export function buildTripCreatedFlex(params: {
     params.members.map((m) => m.displayName + (m.isGuest ? ' (Guest)' : '')).join(', ') ||
     'ยังไม่มีสมาชิก';
 
+  const dateText =
+    params.lockedStartDate && params.lockedEndDate
+      ? formatThaiRange(params.lockedStartDate, params.lockedEndDate)
+      : params.status === 'LOCKED'
+        ? 'ยังไม่ได้กำหนด (พิมพ์ /ตั้งวัน 19-21 พ.ย.)'
+        : 'รอนัดวันว่าง (พิมพ์ /นัด 1-15 ธ.ค. 3วัน)';
+
+  const nextStepsText =
+    params.status === 'LOCKED'
+      ? [
+          '• /ตั้งวัน 19-21 พ.ย. — กำหนดหรือเปลี่ยนวันเดินทาง',
+          '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
+          '• /หาร — เปิดเว็บ LIFF จดบิลหารเงิน & สแกน QR พร้อมเพย์',
+          '• /สรุปยอด — ดูยอดโอนสุทธิและเคลียร์เงิน',
+          '• /ปิดทริป — ปิดทริปเมื่อเคลียร์ยอดครบแล้ว',
+        ].join('\n')
+      : [
+          '• /นัด 1-15 ธ.ค. 3วัน — สร้างปฏิทินหาวันว่างในเว็บ',
+          '• /เริ่มทริป 19-21 พ.ย. — ข้ามการโหวตและเริ่มทริปทันที',
+          '• /เพิ่มคน <ชื่อ> — เพิ่มเพื่อนหรือ Guest นอกกลุ่ม',
+          '• /เปลี่ยนชื่อทริป <ชื่อใหม่> — แก้ไขชื่อทริป',
+        ].join('\n');
+
   const footerButtons: messagingApi.FlexButton[] = [
     {
       type: 'button',
-      style: 'primary',
-      color: THEME.primary,
+      style: params.status === 'LOCKED' ? 'secondary' : 'primary',
+      color: params.status === 'LOCKED' ? THEME.lavenderHaze : THEME.primary,
       height: 'sm',
       action: {
         type: 'postback',
@@ -113,6 +137,18 @@ export function buildTripCreatedFlex(params: {
         type: 'postback',
         label: 'เริ่มทริปเลย',
         data: `action=start_trip_now&tripId=${params.tripId}`,
+      },
+    });
+  } else if (params.status === 'LOCKED') {
+    footerButtons.unshift({
+      type: 'button',
+      style: 'primary',
+      color: THEME.primary,
+      height: 'sm',
+      action: {
+        type: 'uri',
+        label: 'เปิดเว็บจัดการบิล (/หาร)',
+        uri: buildLiffBillsUrl(params.tripId),
       },
     });
   }
@@ -152,10 +188,19 @@ export function buildTripCreatedFlex(params: {
         paddingAll: '16px',
         contents: [
           {
+            type: 'box',
+            layout: 'horizontal',
+            contents: [
+              { type: 'text', text: 'วันเดินทาง', size: 'xs', color: THEME.textSecondary, flex: 2 },
+              { type: 'text', text: dateText, size: 'xs', color: THEME.velvetGrape, flex: 5, align: 'end', wrap: true },
+            ],
+          },
+          {
             type: 'text',
             text: `สมาชิก (${params.members.length} คน)`,
             color: THEME.textSecondary,
             size: 'xs',
+            margin: 'xs',
           },
           {
             type: 'text',
@@ -165,17 +210,29 @@ export function buildTripCreatedFlex(params: {
             wrap: true,
           },
           {
-            type: 'text',
-            text: 'เปลี่ยนชื่อพิมพ์ /เปลี่ยนชื่อทริป <ชื่อใหม่>',
-            color: THEME.textSecondary,
-            size: 'xxs',
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: THEME.lavenderTint,
+            cornerRadius: '10px',
+            paddingAll: '10px',
             margin: 'sm',
+            spacing: 'xs',
+            contents: [
+              { type: 'text', text: 'ทำอะไรต่อได้บ้าง', size: 'xxs', color: THEME.primary },
+              {
+                type: 'text',
+                text: nextStepsText,
+                size: 'xxs',
+                color: THEME.velvetGrape,
+                wrap: true,
+              },
+            ],
           },
         ],
       },
       footer: {
         type: 'box',
-        layout: 'horizontal',
+        layout: 'vertical',
         spacing: 'sm',
         contents: footerButtons,
       },

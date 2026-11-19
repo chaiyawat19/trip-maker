@@ -241,4 +241,17 @@ describe('promptpay & LIFF bill commands', () => {
     expect(payload.startsWith('000201')).toBe(true);
     expect(payload).toContain('350.50');
   });
+
+  it('parses /เริ่มทริป with optional dates and /ตั้งวัน', () => {
+    expect(parseCommand('/เริ่มทริป 19-21 พ.ย.')).toEqual({
+      type: 'START_TRIP',
+      startDate: '2026-11-19',
+      endDate: '2026-11-21',
+    });
+    expect(parseCommand('/ตั้งวัน 19-21 พ.ย.')).toEqual({
+      type: 'SET_TRIP_DATES',
+      startDate: '2026-11-19',
+      endDate: '2026-11-21',
+    });
+  });
 });

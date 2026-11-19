@@ -1,7 +1,8 @@
 export type ParsedCommand =
   | { type: 'CREATE_TRIP'; name: string }
   | { type: 'RENAME_TRIP'; name: string }
-  | { type: 'START_TRIP' }
+  | { type: 'START_TRIP'; startDate?: string; endDate?: string }
+  | { type: 'SET_TRIP_DATES'; startDate: string; endDate: string }
   | { type: 'LIST_TRIPS' }
   | { type: 'JOIN_TRIP' }
   | { type: 'ADD_GUEST'; name: string }
@@ -102,8 +103,19 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
     case '/เปลี่ยนชื่อทริป':
     case '/ตั้งชื่อทริป':
       return rest ? { type: 'RENAME_TRIP', name: rest } : { type: 'HELP' };
-    case '/เริ่มทริป':
+    case '/เริ่มทริป': {
+      if (rest) {
+        const range = parseThaiDateRange(rest, refYear, refMonth);
+        if (range) return { type: 'START_TRIP', startDate: range.startDate, endDate: range.endDate };
+      }
       return { type: 'START_TRIP' };
+    }
+    case '/ตั้งวัน':
+    case '/วันทริป': {
+      const range = parseThaiDateRange(rest, refYear, refMonth);
+      if (!range) return { type: 'HELP' };
+      return { type: 'SET_TRIP_DATES', startDate: range.startDate, endDate: range.endDate };
+    }
     case '/ทริป':
       return { type: 'LIST_TRIPS' };
     case '/เข้าทริป':

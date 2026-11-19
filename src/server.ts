@@ -849,7 +849,17 @@ async function handleTextMessage(
   }
 
   if (parsed.type === 'START_TRIP') {
-    db.update(trips).set({ status: 'LOCKED' }).where(eq(trips.id, trip.id)).run();
+    const start = parsed.startDate ?? trip.lockedStartDate;
+    const end = parsed.endDate ?? trip.lockedEndDate;
+    db.update(trips)
+      .set({
+        status: 'LOCKED',
+        ...(parsed.startDate && parsed.endDate
+          ? { lockedStartDate: parsed.startDate, lockedEndDate: parsed.endDate }
+          : {}),
+      })
+      .where(eq(trips.id, trip.id))
+      .run();
     const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     await lineClient.replyMessage({
       replyToken: event.replyToken,
@@ -858,8 +868,35 @@ async function handleTextMessage(
           tripId: trip.id,
           tripName: trip.name,
           status: 'LOCKED',
-          lockedStartDate: trip.lockedStartDate,
-          lockedEndDate: trip.lockedEndDate,
+          lockedStartDate: start,
+          lockedEndDate: end,
+          members,
+        }),
+      ],
+    });
+    return;
+  }
+
+  if (parsed.type === 'SET_TRIP_DATES') {
+    const nextStatus = trip.status === 'PLANNING' ? 'LOCKED' : trip.status;
+    db.update(trips)
+      .set({
+        status: nextStatus,
+        lockedStartDate: parsed.startDate,
+        lockedEndDate: parsed.endDate,
+      })
+      .where(eq(trips.id, trip.id))
+      .run();
+    const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+    await lineClient.replyMessage({
+      replyToken: event.replyToken,
+      messages: [
+        buildTripCreatedFlex({
+          tripId: trip.id,
+          tripName: trip.name,
+          status: nextStatus,
+          lockedStartDate: parsed.startDate,
+          lockedEndDate: parsed.endDate,
           members,
         }),
       ],
