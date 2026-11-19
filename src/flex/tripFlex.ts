@@ -350,6 +350,130 @@ export function buildTripCompletedFlex(params: {
   };
 }
 
+export function buildMembersFlex(params: {
+  tripId: number;
+  tripName: string;
+  createdByUserId?: string | null;
+  members: Array<{
+    displayName: string;
+    lineUserId?: string | null;
+    avatarUrl?: string | null;
+    isGuest: boolean;
+  }>;
+}): FlexMessage {
+  const memberRows: messagingApi.FlexBox[] =
+    params.members.length === 0
+      ? [{ type: 'box', layout: 'vertical', contents: [{ type: 'text', text: 'ยังไม่มีสมาชิกในทริป', size: 'xs', color: THEME.textSecondary }] }]
+      : params.members.slice(0, 20).map((m) => {
+          const isOwner = Boolean(params.createdByUserId && m.lineUserId === params.createdByUserId);
+          const roleText = isOwner ? 'เจ้าของทริป' : m.isGuest ? 'Guest (คนนอกกลุ่ม)' : 'สมาชิก';
+          const initial = (m.displayName || '?').slice(0, 1);
+
+          const avatarBox: messagingApi.FlexBox =
+            m.avatarUrl && m.avatarUrl.startsWith('https://')
+              ? {
+                  type: 'box',
+                  layout: 'vertical',
+                  width: '36px',
+                  height: '36px',
+                  cornerRadius: '18px',
+                  contents: [
+                    {
+                      type: 'image',
+                      url: m.avatarUrl,
+                      size: 'full',
+                      aspectRatio: '1:1',
+                      aspectMode: 'cover',
+                    },
+                  ],
+                }
+              : {
+                  type: 'box',
+                  layout: 'vertical',
+                  width: '36px',
+                  height: '36px',
+                  cornerRadius: '18px',
+                  backgroundColor: m.isGuest ? THEME.maybeBg : THEME.lavenderHaze,
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  contents: [
+                    {
+                      type: 'text',
+                      text: initial,
+                      size: 'sm',
+                      color: m.isGuest ? THEME.maybeText : THEME.velvetGrape,
+                    },
+                  ],
+                };
+
+          return {
+            type: 'box',
+            layout: 'horizontal',
+            spacing: 'md',
+            alignItems: 'center',
+            backgroundColor: THEME.lavenderTint,
+            cornerRadius: '12px',
+            paddingAll: '10px',
+            contents: [
+              avatarBox,
+              {
+                type: 'box',
+                layout: 'vertical',
+                flex: 1,
+                contents: [
+                  { type: 'text', text: m.displayName, size: 'sm', color: THEME.velvetGrape, wrap: true },
+                  { type: 'text', text: roleText, size: 'xxs', color: isOwner ? THEME.primary : THEME.textSecondary },
+                ],
+              },
+            ],
+          };
+        });
+
+  return {
+    type: 'flex',
+    altText: `สมาชิกทริป ${params.tripName} (${params.members.length} คน)`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: THEME.lavenderTint,
+        paddingAll: '16px',
+        contents: [
+          { type: 'text', text: `สมาชิกทริป • ${params.tripName}`, size: 'xs', color: THEME.primary },
+          { type: 'text', text: `ทั้งหมด ${params.members.length} คน`, size: 'md', color: THEME.velvetGrape, margin: 'xs' },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        paddingAll: '14px',
+        contents: memberRows,
+      },
+      footer: {
+        type: 'box',
+        layout: 'horizontal',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: THEME.primary,
+            height: 'sm',
+            action: {
+              type: 'postback',
+              label: 'เข้าร่วมทริป',
+              data: `action=join_trip&tripId=${params.tripId}`,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 function statBox(label: string, value: string): messagingApi.FlexBox {
   return {
     type: 'box',

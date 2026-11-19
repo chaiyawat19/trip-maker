@@ -9,6 +9,7 @@ export type ParsedCommand =
   | { type: 'CLOSE_TRIP' }
   | { type: 'CREATE_POLL'; startDate: string; endDate: string; durationDays: number }
   | { type: 'SET_AVAILABILITY'; status: 'FREE' | 'MAYBE' | 'BUSY'; dates: string[] }
+  | { type: 'SET_GUEST_AVAILABILITY'; guestName: string; status: 'FREE' | 'MAYBE' | 'BUSY'; dates: string[] }
   | { type: 'VIEW_AVAILABILITY' }
   | { type: 'REMIND_FRIENDS' }
   | {
@@ -152,6 +153,25 @@ export function parseCommand(text: string, refYear = 2026, refMonth = 12): Parse
         }
       }
       return { type: 'SET_AVAILABILITY', status, dates };
+    }
+    case '/ลงวันแทน': {
+      const m = rest.match(/^(\S+)\s+(ว่าง|ไม่ว่าง|อาจจะ)\s+(.+)$/);
+      if (!m) return { type: 'HELP' };
+      const guestName = m[1].trim();
+      const status = m[2] === 'ว่าง' ? 'FREE' : m[2] === 'ไม่ว่าง' ? 'BUSY' : 'MAYBE';
+      const dates: string[] = [];
+      for (const seg of m[3].split(',')) {
+        const range = parseThaiDateRange(seg.trim(), refYear, refMonth);
+        if (range) {
+          const cur = new Date(`${range.startDate}T00:00:00Z`);
+          const end = new Date(`${range.endDate}T00:00:00Z`);
+          while (cur <= end) {
+            dates.push(cur.toISOString().slice(0, 10));
+            cur.setUTCDate(cur.getUTCDate() + 1);
+          }
+        }
+      }
+      return dates.length > 0 ? { type: 'SET_GUEST_AVAILABILITY', guestName, status, dates } : { type: 'HELP' };
     }
     case '/หารรวม':
     case '/หารเพิ่ม':

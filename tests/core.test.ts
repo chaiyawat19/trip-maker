@@ -29,6 +29,15 @@ describe('commandParser', () => {
     });
   });
 
+  it('parses /ลงวันแทน for Guest availability by owner', () => {
+    expect(parseCommand('/ลงวันแทน แฟนเอ ไม่ว่าง 5-7 ธ.ค.')).toEqual({
+      type: 'SET_GUEST_AVAILABILITY',
+      guestName: 'แฟนเอ',
+      status: 'BUSY',
+      dates: ['2026-12-05', '2026-12-06', '2026-12-07'],
+    });
+  });
+
   it('parses /เปลี่ยนชื่อทริป, /เริ่มทริป, /ปิดทริป, /สมาชิก, and /สรุปยอด', () => {
     expect(parseCommand('/เปลี่ยนชื่อทริป เกาะล้าน')).toEqual({ type: 'RENAME_TRIP', name: 'เกาะล้าน' });
     expect(parseCommand('/เริ่มทริป')).toEqual({ type: 'START_TRIP' });

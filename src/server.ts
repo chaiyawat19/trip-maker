@@ -28,11 +28,13 @@ import {
   buildTripCreatedFlex,
   buildTripListFlex,
   buildTripCompletedFlex,
+  buildMembersFlex,
 } from './flex/tripFlex.js';
 import { buildCalendarPollFlex } from './flex/calendarFlex.js';
 import { buildBillReceiptFlex, buildBillMenuFlex } from './flex/billFlex.js';
 import { buildSettlementFlex } from './flex/settlementFlex.js';
 import { buildHelpFlex } from './flex/helpFlex.js';
+import { renderPickPage } from './web/pickPage.js';
 
 const PORT = Number(process.env.PORT || 3000);
 const CHANNEL_SECRET = process.env.LINE_CHANNEL_SECRET || '';
@@ -71,6 +73,65 @@ function verifyLineSignature(rawBody: string, signature: string | undefined): bo
 
 app.get('/health', async () => {
   return { status: 'ok', bot: 'PromptPai (พร้อมไป)' };
+});
+
+app.get('/pick', async (request, reply) => {
+  const query = request.query as { pollId?: string };
+  const pollId = Number(query.pollId);
+  const poll = db.select().from(datePolls).where(eq(datePolls.id, pollId)).get();
+  if (!poll) return reply.code(404).send('Poll not found');
+  const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+  if (!trip) return reply.code(404).send('Trip not found');
+
+  const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
+  const rows = db.select().from(availabilities).where(eq(availabilities.pollId, poll.id)).all();
+
+  const html = renderPickPage({
+    pollId: poll.id,
+    tripName: trip.name,
+    startDate: poll.startDate,
+    endDate: poll.endDate,
+    durationDays: poll.durationDays,
+    members: members.map((m) => ({ id: m.id, displayName: m.displayName, isGuest: m.isGuest })),
+    records: rows.map((r) => ({
+      memberId: r.memberId,
+      date: r.date,
+      status: r.status as 'FREE' | 'MAYBE' | 'BUSY',
+    })),
+  });
+  return reply.type('text/html; charset=utf-8').send(html);
+});
+
+app.post('/api/pick', async (request, reply) => {
+  const body = request.body as {
+    pollId: number;
+    memberId: number;
+    entries: Array<{ date: string; status: 'FREE' | 'MAYBE' | 'BUSY' }>;
+  };
+  const poll = db.select().from(datePolls).where(eq(datePolls.id, body.pollId)).get();
+  if (!poll) return reply.code(404).send({ error: 'Poll not found' });
+  const trip = db.select().from(trips).where(eq(trips.id, poll.tripId)).get();
+  if (!trip) return reply.code(404).send({ error: 'Trip not found' });
+
+  // Replace member's existing records in this poll with batch entries
+  db.delete(availabilities)
+    .where(and(eq(availabilities.pollId, poll.id), eq(availabilities.memberId, body.memberId)))
+    .run();
+
+  for (const e of body.entries) {
+    upsertAvailability(poll.id, body.memberId, e.date, e.status);
+  }
+
+  const flex = buildPollFlexForId(poll.id, 'FREE');
+  if (flex && trip.groupId) {
+    try {
+      await lineClient.pushMessage({ to: trip.groupId, messages: [flex] });
+    } catch (err) {
+      request.log.error(err, 'Failed to push batch availability update');
+    }
+  }
+
+  return { ok: true };
 });
 
 app.post('/webhook', async (request, reply) => {
@@ -118,12 +179,15 @@ async function handleEvent(event: WebhookEvent) {
   }
 }
 
-async function ensureUserProfileName(groupId: string, userId: string): Promise<string> {
+async function ensureUserProfile(
+  groupId: string,
+  userId: string,
+): Promise<{ displayName: string; avatarUrl: string | null }> {
   try {
     const profile = await lineClient.getGroupMemberProfile(groupId, userId);
-    return profile.displayName;
+    return { displayName: profile.displayName, avatarUrl: profile.pictureUrl ?? null };
   } catch {
-    return `เพื่อน-${userId.slice(-4)}`;
+    return { displayName: `เพื่อน-${userId.slice(-4)}`, avatarUrl: null };
   }
 }
 
@@ -133,15 +197,28 @@ async function ensureMemberInTrip(tripId: number, groupId: string, userId: strin
     .from(tripMembers)
     .where(and(eq(tripMembers.tripId, tripId), eq(tripMembers.lineUserId, userId)))
     .get();
-  if (existing) return existing;
+  if (existing) {
+    if (!existing.avatarUrl) {
+      const prof = await ensureUserProfile(groupId, userId);
+      if (prof.avatarUrl) {
+        db.update(tripMembers)
+          .set({ avatarUrl: prof.avatarUrl, displayName: prof.displayName })
+          .where(eq(tripMembers.id, existing.id))
+          .run();
+        return { ...existing, avatarUrl: prof.avatarUrl, displayName: prof.displayName };
+      }
+    }
+    return existing;
+  }
 
-  const displayName = await ensureUserProfileName(groupId, userId);
+  const prof = await ensureUserProfile(groupId, userId);
   return db
     .insert(tripMembers)
     .values({
       tripId,
       lineUserId: userId,
-      displayName,
+      displayName: prof.displayName,
+      avatarUrl: prof.avatarUrl,
       isGuest: false,
       createdAt: new Date().toISOString(),
     })
@@ -479,12 +556,10 @@ async function handleTextMessage(
     await lineClient.replyMessage({
       replyToken: event.replyToken,
       messages: [
-        buildTripCreatedFlex({
+        buildMembersFlex({
           tripId: trip.id,
           tripName: trip.name,
-          status: trip.status,
-          lockedStartDate: trip.lockedStartDate,
-          lockedEndDate: trip.lockedEndDate,
+          createdByUserId: trip.createdByUserId,
           members,
         }),
       ],
@@ -577,10 +652,10 @@ async function handleTextMessage(
     const members = db.select().from(tripMembers).where(eq(tripMembers.tripId, trip.id)).all();
     const rows = db.select().from(availabilities).where(eq(availabilities.pollId, poll.id)).all();
     const respondedIds = new Set(rows.map((r) => r.memberId));
-    const pending = members.filter((m) => !respondedIds.has(m.id));
+    const pending = members.filter((m) => !m.isGuest && !respondedIds.has(m.id));
     const msg =
       pending.length === 0
-        ? 'ทุกคนตอบวันว่างครบแล้วครับ!'
+        ? 'สมาชิกในกลุ่มตอบวันว่างครบทุกคนแล้วครับ!'
         : `ยังรอคำตอบวันว่างจาก: ${pending.map((m) => m.displayName).join(', ')}`;
     await lineClient.replyMessage({
       replyToken: event.replyToken,
@@ -608,6 +683,55 @@ async function handleTextMessage(
 
     for (const d of parsed.dates) {
       upsertAvailability(poll.id, member.id, d, parsed.status);
+    }
+
+    const flex = buildPollFlexForId(poll.id, parsed.status);
+    if (flex) {
+      await lineClient.replyMessage({ replyToken: event.replyToken, messages: [flex] });
+    }
+    return;
+  }
+
+  if (parsed.type === 'SET_GUEST_AVAILABILITY' && userId) {
+    if (trip.createdByUserId && trip.createdByUserId !== userId) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'เฉพาะเจ้าของทริปเท่านั้นที่ลงวันแทน Guest ได้ครับ' }],
+      });
+      return;
+    }
+
+    const poll = db
+      .select()
+      .from(datePolls)
+      .where(eq(datePolls.tripId, trip.id))
+      .orderBy(desc(datePolls.id))
+      .get();
+    if (!poll) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: 'ยังไม่มีโพลวันว่าง พิมพ์ /นัด 1-15 ธ.ค. 3วัน ก่อนครับ' }],
+      });
+      return;
+    }
+
+    const guest = db
+      .select()
+      .from(tripMembers)
+      .where(and(eq(tripMembers.tripId, trip.id), eq(tripMembers.isGuest, true)))
+      .all()
+      .find((m) => m.displayName.includes(parsed.guestName));
+
+    if (!guest) {
+      await lineClient.replyMessage({
+        replyToken: event.replyToken,
+        messages: [{ type: 'text', text: `ไม่พบ Guest ชื่อ "${parsed.guestName}" ในทริปนี้ครับ` }],
+      });
+      return;
+    }
+
+    for (const d of parsed.dates) {
+      upsertAvailability(poll.id, guest.id, d, parsed.status);
     }
 
     const flex = buildPollFlexForId(poll.id, parsed.status);

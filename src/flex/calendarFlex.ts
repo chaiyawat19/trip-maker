@@ -233,7 +233,6 @@ export function buildCalendarPollFlex(params: {
         spacing: 'sm',
         paddingAll: '14px',
         contents: [
-          modeSwitcher,
           weekdayHeader,
           ...weekRows,
           {
@@ -276,6 +275,17 @@ export function buildCalendarPollFlex(params: {
             type: 'button',
             style: 'primary',
             color: THEME.primary,
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: 'เลือกวันว่าง (ไม่เด้งแชทรัว)',
+              uri: `${(process.env.PUBLIC_BASE_URL || 'https://trip-maker.onrender.com').replace(/\/$/, '')}/pick?pollId=${params.pollId}`,
+            },
+          },
+          {
+            type: 'button',
+            style: 'secondary',
+            color: THEME.lavenderTint,
             height: 'sm',
             action: {
               type: 'postback',
